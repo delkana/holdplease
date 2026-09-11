@@ -138,7 +138,16 @@ const synth = {
 const AUDIO_DIR = 'audio/';
 const AUDIO_RE = /\.(?:mp3|ogg|wav|m4a|flac)$/i;
 const SLOTS = ['plug','plug-trunk','unplug','reel','seat','snag','ring','lamp','click','busy',
-               'trunk','slip','complete','error','lost','warn','bell','dismissed','room','voice'];
+               'trunk','slip','complete','error','lost','warn','bell','dismissed','room',
+               'voice', 'voice/man', 'voice/woman', 'voice/child'];
+/* voice/man and friends share the plain voice settings */
+const baseSlot = s => s.split('/')[0];
+/* who is on the other end, so the right sort of voice answers */
+const VOICE_OF = {
+  '11':'man','14':'man','17':'man','21':'woman','24':'man','28':'woman','31':'man','33':'man',
+  '36':'man','42':'woman','45':'man','47':'man','51':'woman','54':'man','57':'man','62':'woman',
+  '65':'man','68':'man','71':'man','74':'woman','77':'man','82':'woman','85':'woman','88':'woman'
+};
 const SAMPLES = Object.create(null);          /* slot -> [{buf, start}, ...] */
 /* how long each sound is allowed to run. A download is usually longer than the
    board wants — a four second switch click would pile up — so anything over its
@@ -163,14 +172,14 @@ const SLOT_LEVEL = {
 function levelFor(slot, buf, startAt){
   const d = buf.getChannelData(0);
   const from = Math.floor(startAt * buf.sampleRate);
-  const to = Math.min(d.length, from + Math.floor((SLOT_MAX[slot] || 3) * buf.sampleRate));
+  const to = Math.min(d.length, from + Math.floor((SLOT_MAX[baseSlot(slot)] || 3) * buf.sampleRate));
   let peak = 0, sum = 0, n = 0;
   for(let i = from; i < to; i++){ const a = Math.abs(d[i]); if(a > peak) peak = a; sum += a*a; n++; }
   const rms = Math.sqrt(sum / Math.max(1, n));
   /* a sharp transient reads quieter than its peak suggests, so give it a little back */
   const crest = peak / Math.max(rms, 0.0005);
   const punch = crest > 12 ? Math.min(1.6, 1 + (crest - 12)/30) : 1;
-  const want = SLOT_LEVEL[slot] == null ? 0.2 : SLOT_LEVEL[slot];
+  const want = SLOT_LEVEL[baseSlot(slot)] == null ? 0.2 : SLOT_LEVEL[baseSlot(slot)];
   return Math.max(0.03, Math.min(6, want * punch / Math.max(peak, 0.01)));
 }
 
@@ -239,7 +248,7 @@ function playSample(slot, rel, rate){
   src.connect(g); g.connect(master);
   const t = A.currentTime;
   src.start(t, pick.start);                                   /* skip any silent lead-in */
-  const cap = SLOT_MAX[slot];
+  const cap = SLOT_MAX[baseSlot(slot)];
   const left = (pick.buf.duration - pick.start) / (rate || 1);
   if(cap && left > cap){                                      /* and fade a long tail out */
     g.gain.setValueAtTime(level, t + cap - 0.06);
@@ -279,8 +288,13 @@ const sfx = {
   about(){ playSample('warn') || synth.about(); },
   lost(){ playSample('lost') || synth.lost(); },
   dismissed(){ playSample('dismissed') || synth.dismissed(); },
-  /* no generated equivalent: silent until you drop something in */
-  voice(){ playSample('voice', 1, 0.94 + Math.random()*0.12); }
+  /* no generated equivalent: silent until you drop something in.
+     Tries the speaker's own folder, then the shared one. */
+  voice(kind){
+    const rate = 0.94 + Math.random()*0.12;
+    if(kind && playSample('voice/' + kind, 1, rate)) return;
+    playSample('voice', 1, rate);
+  }
 };
 
 let ringNodes = null;
@@ -681,6 +695,12 @@ function begin(){ reset(); paused = false; mode = 'play'; }
 /* hold the board still while the walk-through gets its first call connected */
 const tutHold = () => !!tut && !tut.finished;
 const now = () => shiftT;
+function voiceOf(c){
+  if(!c) return null;
+  if(c.child) return 'child';
+  const l = lines[c.from];
+  return l && !l.trunk ? (VOICE_OF[l.num] || 'woman') : 'woman';
+}
 function heardAdd(t){ if(!heard.includes(t)) heard.push(t); }
 function say(text, bad){ msgs.push({text, t:0, bad:!!bad}); if(msgs.length>3) msgs.shift(); }
 
@@ -1235,7 +1255,7 @@ function update(dt){
         if(!c.heardIt && c.lt > 2.0){
           c.heardIt = true;
           c.log.push({ who:'them', text: requestText(c) });
-          sfx.voice();
+          sfx.voice(voiceOf(c));
         }
         if(c.inquiry && !c.lonely && c.heardIt && c.lt > 5.2 && !c.resolved){
           c.resolved = true;
@@ -1335,7 +1355,7 @@ function update(dt){
           const f = pool[(Math.random()*pool.length)|0];
           if(!heard.includes(f)) heard.push(f);
           floats.push({ x: p.x, y: SHELF_Y + 46, text: f, t: 0 });
-          sfx.voice();
+          sfx.voice(voiceOf(c));
         }
         if(D.pryor && !(tut && !tut.finished) && Math.random() < dt*0.05){
           p.listen = false; mark(); sfx.err();

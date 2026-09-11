@@ -53,8 +53,20 @@ relays chattering, nothing identifiable. It does more for the atmosphere than an
 effect.
 
 `voice/` wants short **wordless** murmurs, roughly 0.6–2 seconds — a cadence, not words.
-One is picked at random and pitched ±6% each time, so five or six gives plenty of variety.
+One is picked at random and pitched ±6% each time, so five or six per folder is plenty.
 Real words would fight the written dialogue on the ticket.
+
+It is split by who is speaking, and the game picks the right one:
+
+| folder | used for |
+|---|---|
+| `voice/man/` | Doc Reilly, Sheriff Doyle, the bank, the farms… |
+| `voice/woman/` | Mabel Kranz, the Hendricks wire, Etta Sowell… |
+| `voice/child/` | the child who cannot give a number |
+| `voice/` | anything the folders above do not cover |
+
+Fill only `voice/` and everyone shares it. Fill the subfolders and the right sort of voice
+answers each caller.
 
 ## How it finds them
 

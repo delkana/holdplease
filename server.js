@@ -31,12 +31,18 @@ http.createServer((req, res) => {
   if (name === '/audio-index.json') {
     const out = {};
     try {
-      for (const d of fs.readdirSync(path.join(ROOT, 'audio'), { withFileTypes: true })) {
-        if (!d.isDirectory()) continue;
-        const files = fs.readdirSync(path.join(ROOT, 'audio', d.name))
-          .filter(f => /\.(mp3|ogg|wav|m4a|flac)$/i.test(f));
-        if (files.length) out[d.name] = files;
-      }
+      const scan = (rel) => {
+        const here = path.join(ROOT, 'audio', rel);
+        const files = [], dirs = [];
+        for (const e of fs.readdirSync(here, { withFileTypes: true })) {
+          if (e.isDirectory()) dirs.push(e.name);
+          else if (/\.(mp3|ogg|wav|m4a|flac)$/i.test(e.name)) files.push(e.name);
+        }
+        if (files.length) out[rel] = files;
+        for (const d of dirs) scan(rel ? rel + '/' + d : d);   /* voice/man, and so on */
+      };
+      for (const e of fs.readdirSync(path.join(ROOT, 'audio'), { withFileTypes: true }))
+        if (e.isDirectory()) scan(e.name);
     } catch (e) { /* no audio folder yet */ }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
     return res.end(JSON.stringify(out));
