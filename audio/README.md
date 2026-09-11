@@ -63,6 +63,16 @@ works. On a plain static host it reads the directory listing instead. Opened str
 disk as `file://`, neither is available — there, name the file after the folder and put it
 alongside (`audio/plug.wav`), or just run `npm start`.
 
+## Files are trimmed to fit
+
+Downloads usually need no editing. Any silence at the start is skipped, so the sound is
+prompt, and anything longer than the board wants is faded out at its limit — a four second
+switch recording becomes a 0.35s click. Caps are roughly: clicks and lamps a third of a
+second, plugs and cords about one, the bell four. `ring/` and `room/` loop instead and are
+not capped.
+
+If a sound feels clipped, trim the file yourself and it will play in full.
+
 ## Levels
 
 Everything routes through the game's master volume, so the in-game slider and mute still
