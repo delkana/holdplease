@@ -22,6 +22,7 @@ each time it plays. Three plug sounds means the board stops sounding mechanical.
 |---|---|---|
 | `plug/` | a plug seats in a jack | the most-repeated sound in the game |
 | `plug-trunk/` | a plug seats in a **trunk** jack | optional — without it, `plug` is pitched down 12% |
+| `answer/` | the far end lifts their receiver | the ringing cuts off the instant it plays |
 | `unplug/` | a plug is pulled out of a jack | |
 | `reel/` | a cord runs home to its spring | louder the further it travelled |
 | `seat/` | the plug drops into the spring | the knock at the end of the run |

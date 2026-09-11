@@ -113,6 +113,12 @@ const synth = {
   bell(){ for(let i=0;i<4;i++) beep(1180, 0.5, 0.09, 'sine', i*0.22); },
   /* a hand hovering over the hook: you have about three seconds */
   about(){ beep(1760, 0.045, 0.045, 'sine'); beep(1760, 0.045, 0.04, 'sine', 0.095); },
+  /* a receiver coming OFF its hook: the click, then the line opening up */
+  answer(){
+    noise(0.032, 0.15, 'highpass', 1900);
+    noise(0.13,  0.09, 'bandpass', 680, 0.8, 0.02);
+    beep(184, 0.07, 0.07, 'triangle', 0.025);
+  },
   /* a receiver going back on its hook, and the line falling away without you */
   lost(){
     noise(0.05, 0.26, 'lowpass', 850);
@@ -138,7 +144,7 @@ const synth = {
 const AUDIO_DIR = 'audio/';
 const AUDIO_RE = /\.(?:mp3|ogg|wav|m4a|flac)$/i;
 const SLOTS = ['plug','plug-trunk','unplug','reel','seat','snag','ring','lamp','click','busy',
-               'trunk','slip','complete','error','lost','warn','bell','dismissed','room',
+               'trunk','slip','complete','error','lost','warn','bell','dismissed','room','answer',
                'voice', 'voice/man', 'voice/woman', 'voice/child'];
 /* voice/man and friends share the plain voice settings */
 const baseSlot = s => s.split('/')[0];
@@ -155,7 +161,7 @@ const SAMPLES = Object.create(null);          /* slot -> [{buf, start}, ...] */
 const SLOT_MAX = {
   lamp:0.25, click:0.35, busy:1.2, plug:1.0, 'plug-trunk':1.0, unplug:0.6, seat:0.5,
   snag:0.6, reel:1.3, slip:0.9, trunk:1.6, complete:1.5, error:1.2, lost:1.6,
-  warn:0.9, bell:4.0, dismissed:3.0, voice:2.5
+  warn:0.9, bell:4.0, dismissed:3.0, voice:2.5, answer:0.9
 };
 /* Downloads arrive normalised near full scale; the generated sounds they sit beside
    peak between 0.05 and 0.22. Left alone, every file added would bury them. So each
@@ -164,7 +170,7 @@ const SLOT_MAX = {
 const SLOT_LEVEL = {
   lamp:0.18, click:0.16, busy:0.22, plug:0.30, 'plug-trunk':0.30, unplug:0.24,
   seat:0.22, snag:0.16, reel:0.26, slip:0.18, trunk:0.22, complete:0.20,
-  error:0.26, lost:0.22, warn:0.20, bell:0.34, dismissed:0.34,
+  error:0.26, lost:0.22, warn:0.20, bell:0.34, dismissed:0.34, answer:0.24,
   ring:0.40,            /* held for seconds at a time, so it earns some room */
   room:0.10,            /* a bed, under everything */
   voice:0.30
@@ -287,6 +293,7 @@ const sfx = {
   bell(){ playSample('bell') || synth.bell(); },
   about(){ playSample('warn') || synth.about(); },
   lost(){ playSample('lost') || synth.lost(); },
+  answer(){ playSample('answer') || synth.answer(); },
   dismissed(){ playSample('dismissed') || synth.dismissed(); },
   /* no generated equivalent: silent until you drop something in.
      Tries the speaker's own folder, then the shared one. */
@@ -318,6 +325,12 @@ function ringOn(){
   o1.connect(g); o2.connect(g); g.connect(master);
   o1.start(); o2.start(); lfo.start();
   ringNodes = {g,o1,o2,lfo};
+}
+/* the ringing current stops when they pick up, whether or not your thumb has moved */
+function ringStopIfAnswered(){
+  const stillRinging = pairs.some(q => q.ring && q.call &&
+    q.call.phase === 'answered' && !q.call.resolved);
+  if(!stillRinging) ringOff();
 }
 function ringOff(){
   if(!ringNodes) return;
@@ -1115,10 +1128,10 @@ function judgePattern(p, c){
   const want = tl.members[c.wantMember];
   const got = tl.members.findIndex(m => codeEq(m.code, p.lastPattern));
   if(got === c.wantMember && t === c.want){
-    c.phase = 'live'; c.resolved = true; c.talked = 0; sfx.lamp();
+    c.phase = 'live'; c.resolved = true; c.talked = 0; sfx.answer(); ringStopIfAnswered();
   } else if(got >= 0){
     c.phase = 'live'; c.resolved = true; c.talked = 0; c.wrong = true;
-    mark(); sfx.err();
+    ringStopIfAnswered(); mark(); sfx.err();
     say('You rang ' + tl.members[got].name + '. That is not who asked for.', true);
   } else {
     c.badCode = true;
@@ -1275,7 +1288,7 @@ function update(dt){
         if(c.ringAcc > 1.8){
           c.phase = 'answered'; c.answeredAt = now(); c.ringAcc = 0; p.pattern = [];
           c.log.push({who:'them', text:'About time. Put me through.'});
-          sfx.lamp();
+          sfx.answer(); ringStopIfAnswered();
         }
       }
       continue;
@@ -1338,7 +1351,8 @@ function update(dt){
           }
         } else if(!dl.party){
           if(c.willAnswer && c.ringAcc > 1.8){
-            c.phase = 'live'; c.resolved = true; c.talked = 0; p.pattern = []; sfx.lamp();
+            c.phase = 'live'; c.resolved = true; c.talked = 0; p.pattern = [];
+            sfx.answer(); ringStopIfAnswered();
             if(c.connected && dest === c.want){
               const k = c.connected;
               if(k.memo){ career[k.memo[0]] = k.memo[1]; saveCareer(); }

@@ -117,6 +117,7 @@ whatever is within reach.
 
 | folder | make it with |
 |---|---|
+| `answer/` | lift a phone off a cradle by the mic, or a soft mouth click |
 | `seat/` | a pen or coin dropped onto a wooden desk |
 | `unplug/` | pulling any cable out of any socket |
 | `snag/` | a cable dragged across a desk edge |
