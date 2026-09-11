@@ -73,8 +73,16 @@ not capped.
 
 If a sound feels clipped, trim the file yourself and it will play in full.
 
-## Levels
+## Levels are handled for you
 
-Everything routes through the game's master volume, so the in-game slider and mute still
-work. Master your files at a consistent, fairly quiet level — several play at once when the
-board is busy, and the generated sounds they sit beside are deliberately restrained.
+You do not need to match levels. Downloads arrive normalised near full scale; the generated
+sounds they sit beside peak between 0.05 and 0.22, so a raw file would bury them. Each slot
+has a level it should land at, and whatever you drop in is scaled to reach it — loud or
+quiet, it sits in the mix. A sharp transient gets a little back, since it reads quieter than
+its peak suggests.
+
+Everything still routes through the game's master volume, so the in-game slider and mute
+work as before.
+
+If a sound feels wrong against the others, the levels live in `SLOT_LEVEL` near the top of
+the script in `index.html`.

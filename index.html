@@ -148,6 +148,32 @@ const SLOT_MAX = {
   snag:0.6, reel:1.3, slip:0.9, trunk:1.6, complete:1.5, error:1.2, lost:1.6,
   warn:0.9, bell:4.0, dismissed:3.0, voice:2.5
 };
+/* Downloads arrive normalised near full scale; the generated sounds they sit beside
+   peak between 0.05 and 0.22. Left alone, every file added would bury them. So each
+   slot has a level it should land at, and whatever you drop in is scaled to reach it.
+   Drop any file, loud or quiet, and it sits in the mix. */
+const SLOT_LEVEL = {
+  lamp:0.18, click:0.16, busy:0.22, plug:0.30, 'plug-trunk':0.30, unplug:0.24,
+  seat:0.22, snag:0.16, reel:0.26, slip:0.18, trunk:0.22, complete:0.20,
+  error:0.26, lost:0.22, warn:0.20, bell:0.34, dismissed:0.34,
+  ring:0.40,            /* held for seconds at a time, so it earns some room */
+  room:0.10,            /* a bed, under everything */
+  voice:0.30
+};
+function levelFor(slot, buf, startAt){
+  const d = buf.getChannelData(0);
+  const from = Math.floor(startAt * buf.sampleRate);
+  const to = Math.min(d.length, from + Math.floor((SLOT_MAX[slot] || 3) * buf.sampleRate));
+  let peak = 0, sum = 0, n = 0;
+  for(let i = from; i < to; i++){ const a = Math.abs(d[i]); if(a > peak) peak = a; sum += a*a; n++; }
+  const rms = Math.sqrt(sum / Math.max(1, n));
+  /* a sharp transient reads quieter than its peak suggests, so give it a little back */
+  const crest = peak / Math.max(rms, 0.0005);
+  const punch = crest > 12 ? Math.min(1.6, 1 + (crest - 12)/30) : 1;
+  const want = SLOT_LEVEL[slot] == null ? 0.2 : SLOT_LEVEL[slot];
+  return Math.max(0.03, Math.min(6, want * punch / Math.max(peak, 0.01)));
+}
+
 /* and they often start with a moment of silence, which reads as lag */
 function leadIn(buf){
   const d = buf.getChannelData(0), n = Math.min(d.length, buf.sampleRate * 2);
@@ -163,7 +189,8 @@ async function loadInto(slot, url){
     const res = await fetch(url);
     if(!res.ok) return;
     const buf = await ac().decodeAudioData(await res.arrayBuffer());
-    (SAMPLES[slot] || (SAMPLES[slot] = [])).push({ buf, start: leadIn(buf) });
+    const start = leadIn(buf);
+    (SAMPLES[slot] || (SAMPLES[slot] = [])).push({ buf, start, gain: levelFor(slot, buf, start) });
   }catch(e){ /* missing, or not decodable — leave the slot to fall back */ }
 }
 /* what is sitting in audio/<slot>/ ? The node server says so directly; a plain
@@ -200,21 +227,22 @@ async function loadSamples(){
   roomOn();
 }
 /* several files in one folder become variants: one is chosen each time */
-function playSample(slot, gain, rate){
+function playSample(slot, rel, rate){
   const A = ac(), bank = SAMPLES[slot];
   if(!A || !bank || !bank.length) return false;
   const pick = bank.length === 1 ? bank[0] : bank[(Math.random()*bank.length)|0];
+  const level = pick.gain * (rel == null ? 1 : rel);
   const src = A.createBufferSource();
   src.buffer = pick.buf;
   if(rate) src.playbackRate.value = rate;
-  const g = A.createGain(); g.gain.value = gain == null ? 0.9 : gain;
+  const g = A.createGain(); g.gain.value = level;
   src.connect(g); g.connect(master);
   const t = A.currentTime;
   src.start(t, pick.start);                                   /* skip any silent lead-in */
   const cap = SLOT_MAX[slot];
   const left = (pick.buf.duration - pick.start) / (rate || 1);
   if(cap && left > cap){                                      /* and fade a long tail out */
-    g.gain.setValueAtTime(gain == null ? 0.9 : gain, t + cap - 0.06);
+    g.gain.setValueAtTime(level, t + cap - 0.06);
     g.gain.linearRampToValueAtTime(0.0001, t + cap);
     src.stop(t + cap + 0.02);
   }
@@ -225,34 +253,34 @@ function roomOn(){
   if(!A || roomSource || !bank || !bank.length) return;
   const src = A.createBufferSource();
   src.buffer = bank[0].buf; src.loop = true;
-  const g = A.createGain(); g.gain.value = 0.20;
+  const g = A.createGain(); g.gain.value = bank[0].gain;
   src.connect(g); g.connect(master); src.start();
   roomSource = src;
 }
 
 const sfx = {
-  lamp(){ playSample('lamp', 0.8) || synth.lamp(); },
-  click(){ playSample('click', 0.8) || synth.click(); },
-  dbl(){ playSample('busy', 0.8) || synth.dbl(); },
+  lamp(){ playSample('lamp') || synth.lamp(); },
+  click(){ playSample('click') || synth.click(); },
+  dbl(){ playSample('busy') || synth.dbl(); },
   thunk(big){
-    if(big && playSample('plug-trunk', 0.9)) return;
-    if(playSample('plug', 0.9, big ? 0.88 : 1)) return;
+    if(big && playSample('plug-trunk')) return;
+    if(playSample('plug', 1, big ? 0.88 : 1)) return;
     synth.thunk(big);
   },
-  snap(){ playSample('unplug', 0.8) || synth.snap(); },
-  snag(){ playSample('snag', 0.7) || synth.snag(); },
-  reel(dur, d){ playSample('reel', Math.min(0.9, 0.4 + d/2200)) || synth.reel(dur, d); },
-  seat(){ playSample('seat', 0.8) || synth.seat(); },
-  err(){ playSample('error', 0.8) || synth.err(); },
-  good(){ playSample('complete', 0.8) || synth.good(); },
-  slip(){ playSample('slip', 0.8) || synth.slip(); },
-  trunk(){ playSample('trunk', 0.8) || synth.trunk(); },
-  bell(){ playSample('bell', 0.8) || synth.bell(); },
-  about(){ playSample('warn', 0.8) || synth.about(); },
-  lost(){ playSample('lost', 0.8) || synth.lost(); },
-  dismissed(){ playSample('dismissed', 0.9) || synth.dismissed(); },
+  snap(){ playSample('unplug') || synth.snap(); },
+  snag(){ playSample('snag') || synth.snag(); },
+  reel(dur, d){ playSample('reel', Math.min(1, 0.55 + d/2400)) || synth.reel(dur, d); },
+  seat(){ playSample('seat') || synth.seat(); },
+  err(){ playSample('error') || synth.err(); },
+  good(){ playSample('complete') || synth.good(); },
+  slip(){ playSample('slip') || synth.slip(); },
+  trunk(){ playSample('trunk') || synth.trunk(); },
+  bell(){ playSample('bell') || synth.bell(); },
+  about(){ playSample('warn') || synth.about(); },
+  lost(){ playSample('lost') || synth.lost(); },
+  dismissed(){ playSample('dismissed') || synth.dismissed(); },
   /* no generated equivalent: silent until you drop something in */
-  voice(){ playSample('voice', 0.55, 0.94 + Math.random()*0.12); }
+  voice(){ playSample('voice', 1, 0.94 + Math.random()*0.12); }
 };
 
 let ringNodes = null;
@@ -262,7 +290,7 @@ function ringOn(){
     const src = A.createBufferSource();
     src.buffer = SAMPLES['ring'][0].buf; src.loop = true;
     src.loopStart = SAMPLES['ring'][0].start;
-    const g = A.createGain(); g.gain.value = 0.5;
+    const g = A.createGain(); g.gain.value = SAMPLES['ring'][0].gain;
     src.connect(g); g.connect(master); src.start();
     ringNodes = { sample: true, src, g };
     return;
