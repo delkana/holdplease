@@ -4,14 +4,18 @@ A manual telephone switchboard. Verity Exchange, position 4, four in the afterno
 
 Eight cord pairs, twenty-four lines, three trunks out of town. One of you.
 
+You are not the only operator, though — Verity has an aisle of positions, and every line
+on your board is multipled to all of them. Any of them can take a line you are about to
+want, and their cords are invisible to you. That is what the flick-test is for.
+
 ## The job
 
 A lamp lights when a subscriber lifts their receiver. Drag the **front plug** of a free
 pair into that jack, throw the pair's **listening key** — you cannot hear a word without
 it — and take the number. Then take the **back plug**, hold it over the wanted jack for a
-moment to **flick-test** it (a double click means that line is busy elsewhere on the
-board; there is no other way to know), plug in, and **hold the ringing key** until they
-answer. Then release the listening key. The call is no longer yours.
+moment to **flick-test** it (a double click means another position is already working
+that line; there is no other way to know), plug in, and **hold the ringing key** until
+they answer. Then release the listening key. The call is no longer yours.
 
 The two small lamps beneath each pair are supervisory. Lit means that end is on the hook.
 Both lit means the call is over — pull the cords and get your pair back.

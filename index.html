@@ -1673,13 +1673,13 @@ function actUp(id){
          and you thought better of it, or came back clear and the line was seized in the
          moment since, you did not go in blind — and blind is what the mark is for. */
       if(d.hoverJack === j && d.test){
-        if(D.warn) say(jn + ' is busy. Take the cords down and you can ring back.');
+        if(D.warn) say(jn + ' is busy — another position has it. Take the cords down and ring back.');
         settle(p, d.end);
         return;
       }
       mark(); sfx.err();
       say(j.trunk ? jn + ' is working a call for another position.'
-                  : 'You cut into a conversation on ' + jn + '. Both parties heard you.'
+                  : 'You cut into a conversation on ' + jn + ' — another position had that line. Both parties heard you.'
                     + (D.warn && !stats.cutIn ? ' Hold a plug over a jack a moment to test it first.' : ''), true);
       if(!j.trunk) stats.cutIn = true;
       settle(p, d.end);
@@ -2369,11 +2369,13 @@ function renderHelp(){
     '1.   Drag the FRONT plug (left of a pair, red cord) into the lit jack.',
     '2.   Throw that pair’s LISTENING key. You cannot hear a word without it.',
     '3.   Take the BACK plug (right, blue cord) and hold it over the wanted jack',
-    '      for a moment to FLICK-TEST. A double click means that line is busy',
-    '      elsewhere on the board — there is no other way to know, and the jack',
-    '      looks no different. Go in without testing and you cut into a conversation,',
-    '      which goes on your sheet. Test first and it never can: you either find it',
-    '      clear, or you pull away and file a slip to ring them back.',
+    '      for a moment to FLICK-TEST. A double click means another position is',
+    '      already working that line: every line here is multipled to every',
+    '      operator in the aisle, and their cords are invisible to you. The jack',
+    '      looks no different, and the test is the only way to know.',
+    '      Go in untested and you cut into a conversation, which goes on your',
+    '      sheet. Test first and it never can — you either find it clear, or you',
+    '      pull away and file a slip to ring them back.',
     '4.   If it is free, plug in and HOLD the RINGING key until they answer.',
     '5.   Release the listening key. The call is no longer yours.',
     '',
