@@ -4,7 +4,7 @@ node_modules/
 *.log
 
 # your sound files stay local unless you choose to commit them
-audio/*.mp3
-audio/*.ogg
-audio/*.wav
-audio/voice/
+# (.railwayignore keeps them in the deploy even though git skips them)
+audio/**/*.mp3
+audio/**/*.ogg
+audio/**/*.wav
