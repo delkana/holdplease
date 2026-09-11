@@ -136,66 +136,73 @@ const synth = {
    An audio/manifest.json listing filenames avoids the probe requests; without one
    each slot is tried as .mp3, .ogg then .wav, once, on the first click. */
 const AUDIO_DIR = 'audio/';
-const AUDIO_EXTS = ['mp3','ogg','wav'];
-const SOUND_SLOTS = ['lamp','click','busy','plug','plug-trunk','unplug','reel','seat','snag',
-                     'error','complete','slip','trunk','bell','warn','lost','dismissed',
-                     'ring','room'];
-const VOICE_SLOTS = ['voice/1','voice/2','voice/3','voice/4','voice/5','voice/6'];
-const SAMPLES = Object.create(null);
+const AUDIO_RE = /\.(?:mp3|ogg|wav|m4a|flac)$/i;
+const SLOTS = ['plug','plug-trunk','unplug','reel','seat','snag','ring','lamp','click','busy',
+               'trunk','slip','complete','error','lost','warn','bell','dismissed','room','voice'];
+const SAMPLES = Object.create(null);          /* slot -> [AudioBuffer, ...] */
 let samplesTried = false, roomSource = null;
 
-async function loadSlot(name, exts){
-  for(const ext of exts){
-    try{
-      const res = await fetch(AUDIO_DIR + name + '.' + ext);
-      if(!res.ok) continue;
-      SAMPLES[name] = await ac().decodeAudioData(await res.arrayBuffer());
-      return true;
-    }catch(e){ /* not there, or not decodable — try the next */ }
-  }
-  return false;
+async function loadInto(slot, url){
+  try{
+    const res = await fetch(url);
+    if(!res.ok) return;
+    const buf = await ac().decodeAudioData(await res.arrayBuffer());
+    (SAMPLES[slot] || (SAMPLES[slot] = [])).push(buf);
+  }catch(e){ /* missing, or not decodable — leave the slot to fall back */ }
+}
+/* what is sitting in audio/<slot>/ ? The node server says so directly; a plain
+   static host usually answers with a directory listing we can read instead. */
+async function slotFiles(slot, index){
+  if(index) return (index[slot] || []).map(f => AUDIO_DIR + slot + '/' + f);
+  try{
+    const res = await fetch(AUDIO_DIR + slot + '/');
+    if(!res.ok) return [];
+    const html = await res.text();
+    const hrefs = [...html.matchAll(/href="([^"?#]+)"/gi)].map(m => m[1])
+      .filter(h => AUDIO_RE.test(h));
+    return hrefs.map(h => h.startsWith('/') || h.startsWith('http')
+      ? h : AUDIO_DIR + slot + '/' + h.replace(/^.*\//, ''));
+  }catch(e){ return []; }
 }
 async function loadSamples(){
   if(samplesTried || !ac()) return;
   samplesTried = true;
-  let listed = null;
+  let index = null;
   try{
-    const res = await fetch(AUDIO_DIR + 'manifest.json');
-    if(res.ok) listed = await res.json();
+    const res = await fetch('audio-index.json');
+    if(res.ok) index = await res.json();
   }catch(e){}
   const jobs = [];
-  if(Array.isArray(listed)){
-    /* manifest form: ["plug.wav", "ring.ogg", "voice/1.mp3", ...] */
-    for(const f of listed){
-      const dot = String(f).lastIndexOf('.');
-      if(dot > 0) jobs.push(loadSlot(f.slice(0, dot), [f.slice(dot+1)]));
-    }
-  } else {
-    for(const n of SOUND_SLOTS.concat(VOICE_SLOTS)) jobs.push(loadSlot(n, AUDIO_EXTS));
+  for(const slot of SLOTS){
+    const files = await slotFiles(slot, index);
+    for(const f of files) jobs.push(loadInto(slot, f));
+    /* a loose audio/<slot>.<ext> works too, for anyone who prefers flat files */
+    if(!files.length && !index)
+      for(const ext of ['mp3','ogg','wav']) jobs.push(loadInto(slot, AUDIO_DIR + slot + '.' + ext));
   }
   await Promise.all(jobs);
   roomOn();
 }
-function playSample(name, gain, rate){
-  const A = ac();
-  if(!A || !SAMPLES[name]) return false;
+/* several files in one folder become variants: one is chosen each time */
+function playSample(slot, gain, rate){
+  const A = ac(), bank = SAMPLES[slot];
+  if(!A || !bank || !bank.length) return false;
   const src = A.createBufferSource();
-  src.buffer = SAMPLES[name];
+  src.buffer = bank.length === 1 ? bank[0] : bank[(Math.random()*bank.length)|0];
   if(rate) src.playbackRate.value = rate;
   const g = A.createGain(); g.gain.value = gain == null ? 0.9 : gain;
   src.connect(g); g.connect(master); src.start();
   return true;
 }
 function roomOn(){
-  const A = ac();
-  if(!A || roomSource || !SAMPLES['room']) return;
+  const A = ac(), bank = SAMPLES['room'];
+  if(!A || roomSource || !bank || !bank.length) return;
   const src = A.createBufferSource();
-  src.buffer = SAMPLES['room']; src.loop = true;
+  src.buffer = bank[0]; src.loop = true;
   const g = A.createGain(); g.gain.value = 0.20;
   src.connect(g); g.connect(master); src.start();
   roomSource = src;
 }
-const loadedVoices = () => VOICE_SLOTS.filter(v => SAMPLES[v]);
 
 const sfx = {
   lamp(){ playSample('lamp', 0.8) || synth.lamp(); },
@@ -218,20 +225,16 @@ const sfx = {
   about(){ playSample('warn', 0.8) || synth.about(); },
   lost(){ playSample('lost', 0.8) || synth.lost(); },
   dismissed(){ playSample('dismissed', 0.9) || synth.dismissed(); },
-  /* no generated equivalent: silent until you supply them */
-  voice(){
-    const v = loadedVoices();
-    if(!v.length) return;
-    playSample(v[(Math.random()*v.length)|0], 0.55, 0.94 + Math.random()*0.12);
-  }
+  /* no generated equivalent: silent until you drop something in */
+  voice(){ playSample('voice', 0.55, 0.94 + Math.random()*0.12); }
 };
 
 let ringNodes = null;
 function ringOn(){
   const A = ac(); if(!A || ringNodes) return;
-  if(SAMPLES['ring']){
+  if(SAMPLES['ring'] && SAMPLES['ring'].length){
     const src = A.createBufferSource();
-    src.buffer = SAMPLES['ring']; src.loop = true;
+    src.buffer = SAMPLES['ring'][0]; src.loop = true;
     const g = A.createGain(); g.gain.value = 0.5;
     src.connect(g); g.connect(master); src.start();
     ringNodes = { sample: true, src, g };

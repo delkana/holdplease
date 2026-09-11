@@ -13,7 +13,12 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.png':  'image/png',
   '.svg':  'image/svg+xml',
-  '.ico':  'image/x-icon'
+  '.ico':  'image/x-icon',
+  '.mp3':  'audio/mpeg',
+  '.ogg':  'audio/ogg',
+  '.wav':  'audio/wav',
+  '.m4a':  'audio/mp4',
+  '.flac': 'audio/flac'
 };
 
 http.createServer((req, res) => {
@@ -21,6 +26,21 @@ http.createServer((req, res) => {
   try { name = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
   catch { res.writeHead(400, { 'content-type': 'text/plain' }); return res.end('bad request'); }
   if (name === '/' || name === '') name = '/index.html';
+
+  /* tell the game what is sitting in each audio/<slot>/ folder, so any filename works */
+  if (name === '/audio-index.json') {
+    const out = {};
+    try {
+      for (const d of fs.readdirSync(path.join(ROOT, 'audio'), { withFileTypes: true })) {
+        if (!d.isDirectory()) continue;
+        const files = fs.readdirSync(path.join(ROOT, 'audio', d.name))
+          .filter(f => /\.(mp3|ogg|wav|m4a|flac)$/i.test(f));
+        if (files.length) out[d.name] = files;
+      }
+    } catch (e) { /* no audio folder yet */ }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
+    return res.end(JSON.stringify(out));
+  }
 
   const full = path.join(ROOT, path.normalize(name));
   if (!full.startsWith(ROOT + path.sep) && full !== path.join(ROOT, 'index.html')) {
