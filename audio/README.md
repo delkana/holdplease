@@ -47,7 +47,7 @@ These stay **silent** until you supply them — there is no generated equivalent
 | folder | when it plays |
 |---|---|
 | `room/` | **loops** continuously under everything, at 20% |
-| `voice/` | a wordless murmur whenever somebody speaks with the listening key thrown |
+| `voice/` | somebody speaks with the listening key thrown — a murmur, and the number |
 
 `room/` wants 20–40 seconds of quiet tone that loops without a seam: distant operators,
 relays chattering, nothing identifiable. It does more for the atmosphere than any single
@@ -55,7 +55,25 @@ effect.
 
 `voice/` wants short **wordless** murmurs, roughly 0.6–2 seconds — a cadence, not words.
 One is picked at random and pitched ±6% each time, so five or six per folder is plenty.
-Real words would fight the written dialogue on the ticket.
+That murmur is what a caller sounds like asking for somebody **by name**.
+
+When they ask for a **number**, the number itself is spoken, assembled out of clips:
+
+| folder | holds | named |
+|---|---|---|
+| `num/` | one clip per **digit** | `0.wav` … `9.wav` |
+| `word/` | *optional* — a whole number in one breath | `11.wav` … `88.wav` |
+| `tail/` | *optional* — a trailing "…please" | anything |
+
+**Ten digit files cover every number on the board**, out-of-town numbers included —
+the game says them in order: *four, seven.* Record `word/` as well and the number
+comes out in one breath instead: `47.wav` is heard as "forty-seven", matching what
+the ticket says, and digits still carry the toll numbers.
+
+All three live inside the speaker folders too — `voice/man/num/`, `voice/woman/word/`
+— and the game looks in the speaker's own folder first, then the shared one. **If any
+digit of a number is missing, that caller stays a murmur**: half a number spoken aloud
+is worse than none.
 
 It is split by who is speaking, and the game picks the right one:
 

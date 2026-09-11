@@ -145,7 +145,12 @@ const AUDIO_DIR = 'audio/';
 const AUDIO_RE = /\.(?:mp3|ogg|wav|m4a|flac)$/i;
 const SLOTS = ['plug','plug-trunk','unplug','reel','seat','snag','ring','lamp','click','busy',
                'trunk','slip','complete','error','lost','warn','bell','dismissed','room','answer',
-               'voice', 'voice/man', 'voice/woman', 'voice/child'];
+               'voice', 'voice/man', 'voice/woman', 'voice/child',
+               /* the number itself, one file per digit, assembled as it is asked for */
+               'voice/num', 'voice/man/num', 'voice/woman/num', 'voice/child/num',
+               'voice/tail', 'voice/man/tail', 'voice/woman/tail', 'voice/child/tail',
+               /* or the whole number said as one word, for anyone who records all of them */
+               'voice/word', 'voice/man/word', 'voice/woman/word', 'voice/child/word'];
 /* voice/man and friends share the plain voice settings */
 const baseSlot = s => s.split('/')[0];
 /* who is on the other end, so the right sort of voice answers */
@@ -205,7 +210,17 @@ async function loadInto(slot, url){
     if(!res.ok) return;
     const buf = await ac().decodeAudioData(await res.arrayBuffer());
     const start = leadIn(buf);
-    (SAMPLES[slot] || (SAMPLES[slot] = [])).push({ buf, start, gain: levelFor(slot, buf, start) });
+    /* a num/ folder is not a bank of variants but one clip per digit, keyed off the
+       filename: 4.wav, digit-4.mp3 and "take 4" all land on four. */
+    let key = slot;
+    if(/[/](num|word)$/.test(slot)){
+      const runs = url.replace(/^.*[/]/, '').replace(AUDIO_RE, '').match(/[0-9]+/g);
+      const d = runs ? parseInt(runs[runs.length - 1], 10) : NaN;
+      const top = /word$/.test(slot) ? 999 : 9;
+      if(!(d >= 0 && d <= top)) return;              /* unnameable — leave it out */
+      key = slot + ':' + d;
+    }
+    (SAMPLES[key] || (SAMPLES[key] = [])).push({ buf, start, gain: levelFor(slot, buf, start) });
   }catch(e){ /* missing, or not decodable — leave the slot to fall back */ }
 }
 /* what is sitting in audio/<slot>/ ? The node server says so directly; a plain
@@ -242,7 +257,12 @@ async function loadSamples(){
   roomOn();
 }
 /* several files in one folder become variants: one is chosen each time */
-function playSample(slot, rel, rate){
+function slotDur(slot){
+  const bank = SAMPLES[slot];
+  if(!bank || !bank.length) return 0;
+  return bank.reduce((m, p) => Math.max(m, p.buf.duration - p.start), 0);
+}
+function playSample(slot, rel, rate, delay){
   const A = ac(), bank = SAMPLES[slot];
   if(!A || !bank || !bank.length) return false;
   const pick = bank.length === 1 ? bank[0] : bank[(Math.random()*bank.length)|0];
@@ -252,7 +272,7 @@ function playSample(slot, rel, rate){
   if(rate) src.playbackRate.value = rate;
   const g = A.createGain(); g.gain.value = level;
   src.connect(g); g.connect(master);
-  const t = A.currentTime;
+  const t = A.currentTime + (delay || 0);
   src.start(t, pick.start);                                   /* skip any silent lead-in */
   const cap = SLOT_MAX[baseSlot(slot)];
   const left = (pick.buf.duration - pick.start) / (rate || 1);
@@ -271,6 +291,55 @@ function roomOn(){
   const g = A.createGain(); g.gain.value = bank[0].gain;
   src.connect(g); g.connect(master); src.start();
   roomSource = src;
+}
+
+/* Whatever else a bad pair swallowed, the number had to get through — so that is the
+   one part of the sentence rendered as words. Every number on this board is built out
+   of digits, which is ten clips a voice rather than one per subscriber, and it covers
+   the toll numbers as well. Say them in order, and leave the rest a murmur. */
+function digitOf(kind, d){
+  const mine = kind && 'voice/' + kind + '/num:' + d;
+  if(mine && SAMPLES[mine] && SAMPLES[mine].length) return mine;
+  return SAMPLES['voice/num:' + d] && SAMPLES['voice/num:' + d].length ? 'voice/num:' + d : null;
+}
+/* the whole number in one breath — "forty-seven" — if somebody recorded all of them */
+function wordOf(kind, num){
+  const mine = kind && 'voice/' + kind + '/word:' + (+num);
+  if(mine && SAMPLES[mine] && SAMPLES[mine].length) return mine;
+  const any = 'voice/word:' + (+num);
+  return SAMPLES[any] && SAMPLES[any].length ? any : null;
+}
+function sayNumber(kind, num, rate){
+  const whole = wordOf(kind, num);
+  if(whole){
+    playSample(whole, 1, rate);
+    sayTail(kind, rate, Math.max(0.34, Math.min(1.1, slotDur(whole) / rate + 0.06)) + 0.05);
+    return true;
+  }
+  const want = String(num).split('').map(d => digitOf(kind, d));
+  if(!want.length || want.some(s => !s)) return false;    /* half a number is worse than none */
+  let t = 0;
+  for(const slot of want){
+    playSample(slot, 1, rate, t);
+    t += Math.max(0.34, Math.min(0.85, slotDur(slot) / rate + 0.06));
+  }
+  sayTail(kind, rate, t + 0.05);
+  return true;
+}
+/* and a "…please" on the end, if one was left for us */
+function sayTail(kind, rate, at){
+  const mine = kind && 'voice/' + kind + '/tail';
+  playSample(mine && SAMPLES[mine] ? mine : 'voice/tail', 1, rate, at);
+}
+/* what this caller actually reads out. Names, party members and the scripted callers
+   stay a murmur — a name is long, and a number is not. */
+function spokenNum(c){
+  if(c.incoming) return lines[c.want] ? lines[c.want].num : null;
+  if(c.child || c.inquiry || c.eavesBack || c.debtText || c.motherCall) return null;
+  if(c.toll) return c.tollNum;
+  const w = lines[c.want];
+  if(!w || w.party || c.askedBy !== 'number') return null;
+  return w.num;
 }
 
 const sfx = {
@@ -297,8 +366,9 @@ const sfx = {
   dismissed(){ playSample('dismissed') || synth.dismissed(); },
   /* no generated equivalent: silent until you drop something in.
      Tries the speaker's own folder, then the shared one. */
-  voice(kind){
+  voice(kind, num){
     const rate = 0.94 + Math.random()*0.12;
+    if(num != null && sayNumber(kind, num, rate)) return;
     if(kind && playSample('voice/' + kind, 1, rate)) return;
     playSample('voice', 1, rate);
   }
@@ -1305,7 +1375,7 @@ function update(dt){
         if(!c.heardIt && c.lt > 2.0){
           c.heardIt = true;
           c.log.push({ who:'them', text: requestText(c) });
-          sfx.voice(voiceOf(c));
+          sfx.voice(voiceOf(c), spokenNum(c));
         }
         if(c.inquiry && !c.lonely && c.heardIt && c.lt > 5.2 && !c.resolved){
           c.resolved = true;

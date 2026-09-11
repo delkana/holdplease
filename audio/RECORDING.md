@@ -43,7 +43,41 @@ Say them normally. The filtering later is what makes them muffled.
 | 3 | *just a sniff and a breath* | no words at all |
 | 4 | "Please, I want my mama!" | louder, more upset |
 
-## 4. `audio/lamp/` — four to six clicks
+## 4. The numbers — ten takes a voice
+
+This is the one part of the sentence that has to get through, so it is the one part
+said in words. Every number on this board is made of digits, so **ten clips cover all
+of it** — the twenty-four subscribers and the out-of-town numbers both.
+
+Count slowly from **nought to nine**, a clear beat between each, in one take per voice.
+Then in Audacity: **Analyze → Label Sounds** (it drops a label on each digit), then
+**File → Export → Export Multiple**, split on labels. Rename the ten files `0` to `9`.
+
+| folder | say |
+|---|---|
+| `audio/voice/man/num/` | "nought. one. two. three. four. five. six. seven. eight. nine." |
+| `audio/voice/woman/num/` | the same, second voice |
+
+Filter them exactly like the murmurs below. Keep each under a second — they are
+played back to back, and the game spaces them off their own length.
+
+**Optional, and better if you have the patience:** the whole number in one breath, so
+the voice says "forty-seven" where the ticket says *forty-seven*, rather than
+"four, seven". Twenty-four takes a voice, into `audio/voice/man/word/`, named after
+the number — `47.wav`. The numbers are:
+
+```
+11  14  17  21  24  28  31  33  36  42  45  47
+51  54  57  62  65  68  71  74  77  82  85  88
+```
+
+Same trick — read the list with a gap between each, Label Sounds, Export Multiple,
+rename. Anything you skip falls back to the digits, so a half-finished set is fine.
+
+**Optional:** a trailing "…please." and "…would you." in `audio/voice/man/tail/`,
+played after the number. Two clips each voice and the sentence lands.
+
+## 5. `audio/lamp/` — four to six clicks
 
 **The most-played sound in the game** — about thirty times a shift, more than anything
 else, and it is what tells you a call has arrived. It is worth ten minutes.
@@ -67,7 +101,7 @@ start to grate; six variants picked at random will not. Keep them **very short**
 over a quarter of a second is faded out anyway. Do not filter these: the lamp is on the
 board in front of you, not down a line.
 
-## 5. `audio/room/` — one take, 30–40 seconds
+## 6. `audio/room/` — one take, 30–40 seconds
 
 The most valuable single file. Put the phone down in a quiet room and leave it running.
 If you can, have someone talk at normal volume **in another room with the door shut**, and
@@ -98,14 +132,22 @@ Export as WAV or MP3. Any filename.
 ## Where each file goes
 
 ```
-audio/voice/man/    1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
-audio/voice/woman/  1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
-audio/voice/child/  1.wav  2.wav  3.wav  4.wav
-audio/lamp/         1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
-audio/room/         room.wav
+audio/voice/man/        1.wav  2.wav  3.wav  4.wav  5.wav  6.wav     the murmurs
+audio/voice/woman/      1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
+audio/voice/child/      1.wav  2.wav  3.wav  4.wav
+
+audio/voice/man/num/    0.wav … 9.wav                                the digits
+audio/voice/woman/num/  0.wav … 9.wav
+
+audio/voice/man/word/   11.wav … 88.wav                              optional
+audio/voice/man/tail/   please.wav  wouldyou.wav                     optional
+
+audio/lamp/             1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
+audio/room/             room.wav
 ```
 
-Names do not matter. Several files in a folder become variants, picked at random and
+Names matter only in `num/` and `word/`, where the number in the filename is what
+picks the clip. Everywhere else they do not. Several files in a folder become variants, picked at random and
 pitched ±6% each time, so six gives plenty of variety without sounding repetitive.
 
 ---
