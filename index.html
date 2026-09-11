@@ -655,6 +655,10 @@ function reset(){
   shiftT = 0; spawnT = 2.5; bgT = 4.0; trunkT = 14; help = false;
   mouse = { x:0, y:0 };
   trouble = troubleFor(day); longAt = null; stuckTrunk = -1;
+  if(day === INCOMING_FROM_DAY){
+    msgs.push({ text: 'A trunk lamp flashing is a call coming IN. Take it on a front cord, '
+                    + 'then ring the line they ask for.', t: 0, bad: false, life: 15 });
+  }
   if(trouble === 'cord'){
     /* one pair away for repair — announced, because you would be told */
     const b = (Math.random()*NPAIRS)|0;
@@ -712,7 +716,7 @@ function voiceOf(c){
   return l && !l.trunk ? (VOICE_OF[l.num] || 'woman') : 'woman';
 }
 function heardAdd(t){ if(!heard.includes(t)) heard.push(t); }
-function say(text, bad){ msgs.push({text, t:0, bad:!!bad}); if(msgs.length>3) msgs.shift(); }
+function say(text, bad, life){ msgs.push({text, t:0, bad:!!bad, life: life || 5}); if(msgs.length>3) msgs.shift(); }
 
 /* ---------------------------------------------------------------- helpers */
 function lineBusy(l){ return !!l.plug || l.state === 'calling' || now() < l.busyUntil; }
@@ -1171,7 +1175,7 @@ function update(dt){
     retracts = retracts.filter(r => r.t < r.dur);
   }
   floats.forEach(f => f.t += dt); floats = floats.filter(f => f.t < 4.2);
-  msgs.forEach(m => m.t += dt);   msgs   = msgs.filter(m => m.t < 5.0);
+  msgs.forEach(m => m.t += dt);   msgs   = msgs.filter(m => m.t < (m.life || 5));
   lines.forEach(l => { l.lampT += dt; if(l.ringT > 0) l.ringT -= dt; l.urgent = false; });
 
   tutUpdate(dt);
@@ -2245,7 +2249,7 @@ function renderStatus(){
   ctx.textAlign = 'center'; ctx.font = '13px Georgia, serif';
   let y = 58;
   for(const m of msgs){
-    ctx.globalAlpha = Math.max(0, 1-m.t/5);
+    ctx.globalAlpha = Math.max(0, 1 - m.t/(m.life || 5));
     ctx.fillStyle = m.bad ? '#ff7a5a' : '#a8c8a0';
     ctx.fillText(m.text, W/2, y); y += 17;
     ctx.globalAlpha = 1;
@@ -2298,6 +2302,10 @@ function renderHelp(){
     'see what is free. Plug into a trunk and hold the ringing key a good long',
     'pull to raise the operator at the far end. Toll calls talk for a long while,',
     'and they hold that trunk the entire time.',
+    '',
+    'A trunk lamp that FLASHES is another exchange ringing you. Answer it with a',
+    'front cord — the opposite way round — hear which local line they want, and ring',
+    'it for them. That trunk is yours until they are finished.',
     '',
     'When every trunk is taken, take your cords down: that files a slip on the',
     'CALL-BACK RAIL. When a trunk clears, plug a front cord into that',
@@ -2370,6 +2378,8 @@ function renderTitle(){
   ctx.fillStyle = 'rgba(205,186,144,0.9)'; ctx.font = '14px Georgia, serif';
   ctx.fillText(day === 1
     ? 'Day one. This is the pace the board keeps before it has learned your name.'
+    : day === INCOMING_FROM_DAY
+    ? 'Day ' + day + ' — no busier than last night. The other exchanges have your trunks now.'
     : 'Day ' + day + ' — the traffic runs ' + thicker(day) + '% thicker than your first night.',
     W/2, 538);
   ctx.fillStyle = 'rgba(224,138,90,0.8)'; ctx.font = '13px Georgia, serif';
