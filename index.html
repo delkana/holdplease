@@ -734,7 +734,7 @@ function reset(){
   });
   calls = []; callbacks = []; drag = null; floats = []; msgs = []; heard = []; retracts = [];
   stats = { answered:0, answerSum:0, completed:0, abandoned:0, errors:0, best:999,
-            toll:0, kept:0, broken:0, failed:false, walked:false, warned:false };
+            toll:0, kept:0, broken:0, failed:false, walked:false, warned:false, cutIn:false };
   shiftT = 0; spawnT = 2.5; bgT = 4.0; trunkT = 14; help = false;
   mouse = { x:0, y:0 };
   trouble = troubleFor(day); longAt = null; stuckTrunk = -1;
@@ -1499,7 +1499,11 @@ function update(dt){
   }
   if(drag && drag.active){
     drag.x = mouse.x; drag.y = mouse.y - (drag.touch ? TOUCH_LIFT : 0);
-    const j = jackAt(drag.x, drag.y);
+    let j = jackAt(drag.x, drag.y);
+    if(!j && drag.hoverJack){
+      const h = drag.hoverJack;
+      if((drag.x-h.x)**2 + (drag.y-h.y)**2 < (jackHitR()*1.7)**2) j = h;
+    }
     if(j !== drag.hoverJack){ drag.hoverJack = j; drag.hoverT = 0; drag.test = null; }
     else if(j){
       drag.hoverT += dt;
@@ -1664,9 +1668,20 @@ function actUp(id){
   const j = jackAt(mouse.x, mouse.y - (d.touch ? TOUCH_LIFT : 0));
   if(j && !j.plug){
     if(lineBusy(j) && j.state !== 'calling'){
+      const jn = j.trunk ? 'Trunk ' + j.num.slice(1) : j.num;   /* num is 'T1' on a trunk */
+      /* you held the plug over this jack and took the test. Whether it came back busy
+         and you thought better of it, or came back clear and the line was seized in the
+         moment since, you did not go in blind — and blind is what the mark is for. */
+      if(d.hoverJack === j && d.test){
+        if(D.warn) say(jn + ' is busy. Take the cords down and you can ring back.');
+        settle(p, d.end);
+        return;
+      }
       mark(); sfx.err();
-      say(j.trunk ? 'Trunk ' + j.num + ' is working a call for another position.'
-                  : 'You cut into a conversation on ' + j.num + '. Both parties heard you.', true);
+      say(j.trunk ? jn + ' is working a call for another position.'
+                  : 'You cut into a conversation on ' + jn + '. Both parties heard you.'
+                    + (D.warn && !stats.cutIn ? ' Hold a plug over a jack a moment to test it first.' : ''), true);
+      if(!j.trunk) stats.cutIn = true;
       settle(p, d.end);
       return;
     }
@@ -2356,7 +2371,9 @@ function renderHelp(){
     '3.   Take the BACK plug (right, blue cord) and hold it over the wanted jack',
     '      for a moment to FLICK-TEST. A double click means that line is busy',
     '      elsewhere on the board — there is no other way to know, and the jack',
-    '      looks no different. Plug into a busy one and you cut into a conversation.',
+    '      looks no different. Go in without testing and you cut into a conversation,',
+    '      which goes on your sheet. Test first and it never can: you either find it',
+    '      clear, or you pull away and file a slip to ring them back.',
     '4.   If it is free, plug in and HOLD the RINGING key until they answer.',
     '5.   Release the listening key. The call is no longer yours.',
     '',
