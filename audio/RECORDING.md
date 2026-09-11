@@ -43,7 +43,31 @@ Say them normally. The filtering later is what makes them muffled.
 | 3 | *just a sniff and a breath* | no words at all |
 | 4 | "Please, I want my mama!" | louder, more upset |
 
-## 4. `audio/room/` — one take, 30–40 seconds
+## 4. `audio/lamp/` — four to six clicks
+
+**The most-played sound in the game** — about thirty times a shift, more than anything
+else, and it is what tells you a call has arrived. It is worth ten minutes.
+
+A real one is a relay snapping over: a small, dry, electromechanical *tick*, no ring to it.
+A **ballpoint pen** held right against the microphone is almost exactly that sound.
+
+| # | make it with | note |
+|---|---|---|
+| 1 | pen click **down** | the sharper of the two |
+| 2 | pen click **up** | duller — a free second variant from the same pen |
+| 3 | a **different** pen | a slightly different pitch is what you want |
+| 4 | a light switch, close up | bigger, more of a clunk |
+| 5 | a fingernail on a glass or a mug | brighter, drier |
+| 6 | a clothes peg snapped shut | a harder snap |
+
+Record six clicks with a second of gap between them, then cut them into separate files.
+
+**Variation matters more here than anywhere else.** Thirty identical ticks a shift will
+start to grate; six variants picked at random will not. Keep them **very short** — anything
+over a quarter of a second is faded out anyway. Do not filter these: the lamp is on the
+board in front of you, not down a line.
+
+## 5. `audio/room/` — one take, 30–40 seconds
 
 The most valuable single file. Put the phone down in a quiet room and leave it running.
 If you can, have someone talk at normal volume **in another room with the door shut**, and
@@ -77,6 +101,7 @@ Export as WAV or MP3. Any filename.
 audio/voice/man/    1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
 audio/voice/woman/  1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
 audio/voice/child/  1.wav  2.wav  3.wav  4.wav
+audio/lamp/         1.wav  2.wav  3.wav  4.wav  5.wav  6.wav
 audio/room/         room.wav
 ```
 
@@ -87,13 +112,11 @@ pitched ±6% each time, so six gives plenty of variety without sounding repetiti
 
 ## Bonus: things already on your desk
 
-These folders are still using generated sounds, and all of them are easy to record. `lamp/`
-is the one worth doing — it plays about **thirty times a shift**, more than anything else,
-and it is the sound telling you a call has arrived.
+These folders are still using generated sounds, and all of them are easy to record with
+whatever is within reach.
 
 | folder | make it with |
 |---|---|
-| `lamp/` | a ballpoint pen click, or a light switch, close to the mic |
 | `seat/` | a pen or coin dropped onto a wooden desk |
 | `unplug/` | pulling any cable out of any socket |
 | `snag/` | a cable dragged across a desk edge |
