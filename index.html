@@ -1459,9 +1459,8 @@ function hitTest(m){
     return { t:'closescores' };
   }
   if(mode === 'title'){
-    if(inRect(m.x,m.y,TBTN.tut))    return { t:'tut' };
-    if(inRect(m.x,m.y,TBTN.scores)) return { t:'scores' };
-    if(day > 1 && inRect(m.x,m.y,TBTN.reset)) return { t:'resetdays' };
+    for(const c of titleChips()) if(inRect(m.x,m.y,c.rect))
+      return c.key === 'tut' ? { t:'tut' } : c.key === 'sheet' ? { t:'scores' } : { t:'resetdays' };
     const d = diffHit(m);
     return d >= 0 ? { t:'diff', i:d } : { t:'begin' };
   }
@@ -1788,11 +1787,18 @@ function renderCoach(){
 const BTN = {
   help: { x:1096, y:6, w:26, h:24 }
 };
-const TBTN = {
-  tut:    { x:W/2-230, y:620, w:460, h:26 },
-  scores: { x:W/2-330, y:650, w:300, h:24 },
-  reset:  { x:W/2+30,  y:650, w:300, h:24 }
-};
+/* title screen */
+const TROW = { x: W/2-360, w: 720, h: 58, tops: [312, 380, 448], nameGap: 222 };
+const CTA  = { x: W/2-200, y: 600, w: 400, h: 52 };
+function titleChips(){
+  const items = [{ key:'tut',   label:'walk-through: ' + (tutorialOn ? 'ON' : 'OFF') },
+                 { key:'sheet', label:'the record sheet' }];
+  if(day > 1) items.push({ key:'reset', label:'back to day one' });
+  const w = 218, gap = 18, total = items.length*w + (items.length-1)*gap;
+  let x = W/2 - total/2;
+  for(const it of items){ it.rect = { x, y: 682, w, h: 32 }; x += w + gap; }
+  return items;
+}
 /* the record sheet */
 const SFILT = [0,1,2,3].map(i => ({ x: W/2 - 350 + i*176, y: 116, w: 168, h: 30 }));
 const SBACK = { x: W/2-110, y: H-64, w: 220, h: 32 };
@@ -1810,11 +1816,11 @@ function drawMiniBtn(r, label, size){
   ctx.fillStyle = 'rgba(205,185,140,0.85)';
   ctx.fillText(label, r.x + r.w/2, r.y + r.h/2 + (size||14)*0.36);
 }
-const DIFFY = [464, 508, 552];
 function diffHit(m){
   if(mode !== 'title') return -1;
   for(let i=0;i<DIFFS.length;i++)
-    if(Math.abs(m.x - W/2) < 372 && m.y > DIFFY[i]-19 && m.y < DIFFY[i]+21) return i;
+    if(m.x > TROW.x && m.x < TROW.x + TROW.w &&
+       m.y > TROW.tops[i] && m.y < TROW.tops[i] + TROW.h) return i;
   return -1;
 }
 const VOLW = { mx: W-128, tx: W-92, ty: 17, tw: 68 };
@@ -2275,240 +2281,78 @@ function renderHelp(){
   ctx.textAlign = 'left';
 }
 function renderTitle(){
-  const g = ctx.createRadialGradient(W/2,320,20,W/2,320,540);
-  g.addColorStop(0,'rgba(255,180,90,0.10)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  const g = ctx.createRadialGradient(W/2, 300, 20, W/2, 300, 620);
+  g.addColorStop(0,'rgba(255,180,90,0.11)'); g.addColorStop(1,'rgba(0,0,0,0)');
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 62px Georgia, serif';
-  ctx.fillText('HOLD, PLEASE', W/2, 300);
-  ctx.fillStyle = '#8a7546'; ctx.font = '18px Georgia, serif';
-  ctx.fillText('Verity Exchange · Position 4 · ' + weekdayOf(day) + ', four in the afternoon', W/2, 344);
-  ctx.fillStyle = '#bda878'; ctx.font = '15px Georgia, serif';
-  ctx.fillText('Eight cord pairs, twenty-four lines, three trunks out of town. One of you.', W/2, 396);
 
-  ctx.fillStyle = 'rgba(190,165,110,0.4)'; ctx.font = 'bold 10px Georgia, serif';
-  ctx.fillText('WHAT ARE YOU SIGNED ON AS?   (1, 2, 3)', W/2, 432);
+  /* masthead */
+  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 58px Georgia, serif';
+  ctx.fillText('HOLD, PLEASE', W/2, 138);
+  ctx.fillStyle = '#8a7546'; ctx.font = '17px Georgia, serif';
+  ctx.fillText('Verity Exchange · Position 4 · ' + weekdayOf(day) + ', four in the afternoon', W/2, 176);
+  ctx.strokeStyle = 'rgba(190,165,110,0.22)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(W/2-210, 198); ctx.lineTo(W/2+210, 198); ctx.stroke();
+  ctx.fillStyle = '#bda878'; ctx.font = '15px Georgia, serif';
+  ctx.fillText('Eight cord pairs, twenty-four lines, three trunks out of town. One of you.', W/2, 226);
+
+  /* what you are signed on as */
+  ctx.fillStyle = 'rgba(190,165,110,0.45)'; ctx.font = 'bold 10px Georgia, serif';
+  ctx.fillText('WHAT ARE YOU SIGNED ON AS?', W/2, 286);
   for(let i=0;i<DIFFS.length;i++){
-    const d = DIFFS[i], on = i === diff, y = DIFFY[i];
-    if(on){
-      rr(W/2-372, y-19, 744, 40, 4);
-      ctx.fillStyle = 'rgba(255,200,120,0.07)'; ctx.fill();
-      ctx.strokeStyle = 'rgba(255,200,120,0.35)'; ctx.lineWidth = 1.2; ctx.stroke();
-    }
-    ctx.textAlign = 'right';
-    ctx.fillStyle = on ? '#e8cf92' : 'rgba(170,150,110,0.5)';
-    ctx.font = 'bold 14px Georgia, serif';
-    ctx.fillText(d.name, W/2-150, y-2);
+    const d = DIFFS[i], on = i === diff, y = TROW.tops[i];
+    rr(TROW.x, y, TROW.w, TROW.h, 4);
+    ctx.fillStyle = on ? 'rgba(255,200,120,0.075)' : 'rgba(255,255,255,0.018)'; ctx.fill();
+    ctx.strokeStyle = on ? 'rgba(255,200,120,0.45)' : 'rgba(190,165,110,0.12)';
+    ctx.lineWidth = on ? 1.5 : 1; ctx.stroke();
+
     ctx.textAlign = 'left';
-    ctx.fillStyle = on ? 'rgba(200,180,135,0.9)' : 'rgba(150,130,95,0.4)';
-    ctx.font = '12px Georgia, serif';
-    const rows = wrap(d.blurb, 500);
-    ctx.fillText(rows[0], W/2-136, y-7);
-    if(rows[1]) ctx.fillText(rows[1], W/2-136, y+8);
+    ctx.fillStyle = 'rgba(190,165,110,0.35)'; ctx.font = 'bold 11px Georgia, serif';
+    ctx.fillText(String(i+1), TROW.x + 18, y + 34);
+    ctx.fillStyle = on ? '#e8cf92' : 'rgba(170,150,110,0.5)';
+    ctx.font = 'bold 15px Georgia, serif';
+    ctx.fillText(d.name, TROW.x + 40, y + 34);
+
+    const bx = TROW.x + TROW.nameGap;
+    ctx.fillStyle = on ? 'rgba(205,186,144,0.92)' : 'rgba(150,130,95,0.42)';
+    ctx.font = '12.5px Georgia, serif';
+    const rows = wrap(d.blurb, TROW.w - TROW.nameGap - 28).slice(0,2);
+    let ty = rows.length > 1 ? y + 24 : y + 34;
+    for(const r of rows){ ctx.fillText(r, bx, ty); ty += 17; }
     ctx.textAlign = 'center';
   }
 
-  ctx.fillStyle = 'rgba(200,180,135,0.9)'; ctx.font = '14px Georgia, serif';
+  /* where the career stands */
+  ctx.fillStyle = 'rgba(205,186,144,0.9)'; ctx.font = '14px Georgia, serif';
   ctx.fillText(day === 1
     ? 'Day one. This is the pace the board keeps before it has learned your name.'
     : 'Day ' + day + ' — the traffic runs ' + thicker(day) + '% thicker than your first night.',
-    W/2, 590);
-  ctx.fillStyle = 'rgba(224,138,90,0.85)'; ctx.font = '13px Georgia, serif';
-  ctx.fillText('Lose ' + ALLOW + ' calls in a night — whatever you are signed on as — and the run ends. '
-             + 'You start again at day one.', W/2, 610);
+    W/2, 538);
+  ctx.fillStyle = 'rgba(224,138,90,0.8)'; ctx.font = '13px Georgia, serif';
+  ctx.fillText('Lose ' + ALLOW + ' calls in a night and the run ends. You start again at day one.',
+    W/2, 560);
 
-  ctx.textAlign = 'center';
-  ctx.fillStyle = tutorialOn ? 'rgba(160,200,170,0.75)' : 'rgba(150,130,95,0.5)';
-  ctx.font = '13px Georgia, serif';
-  ctx.fillText('walk-through for your first call: ' + (tutorialOn ? 'ON' : 'OFF'), W/2, 638);
-  ctx.strokeStyle = 'rgba(190,165,110,0.2)'; ctx.lineWidth = 1;
-  rr(TBTN.tut.x, TBTN.tut.y, TBTN.tut.w, TBTN.tut.h, 3); ctx.stroke();
+  /* the thing you came here to do */
+  const pulse = 0.5 + 0.5*Math.sin(performance.now()/560);
+  rr(CTA.x, CTA.y, CTA.w, CTA.h, 5);
+  ctx.fillStyle = 'rgba(255,200,120,' + (0.05 + 0.045*pulse) + ')'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,200,120,' + (0.42 + 0.3*pulse) + ')'; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.fillStyle = '#f0d89c'; ctx.font = 'bold 19px Georgia, serif';
+  ctx.fillText('TAKE THE POSITION', W/2, CTA.y + 33);
 
-  ctx.fillStyle = 'rgba(190,170,130,0.7)'; ctx.font = 'italic 13px Georgia, serif';
-  ctx.fillText('the record sheet', W/2 - 180, 666);
-  ctx.strokeStyle = 'rgba(190,165,110,0.18)';
-  rr(TBTN.scores.x, TBTN.scores.y, TBTN.scores.w, TBTN.scores.h, 3); ctx.stroke();
-  if(day > 1){
-    ctx.fillStyle = 'rgba(150,130,95,0.55)';
-    ctx.fillText('go back to day one', W/2 + 180, 666);
-    ctx.strokeStyle = 'rgba(190,165,110,0.14)';
-    rr(TBTN.reset.x, TBTN.reset.y, TBTN.reset.w, TBTN.reset.h, 3); ctx.stroke();
-  }
-  ctx.fillStyle = 'rgba(190,170,130,0.55)'; ctx.font = 'italic 13px Georgia, serif';
-  ctx.fillText('Press H for the operating instructions.', W/2, 694);
-  ctx.fillStyle = 'rgba(255,200,120,' + (0.45 + 0.35*Math.sin(performance.now()/450)) + ')';
-  ctx.font = 'bold 17px Georgia, serif';
-  ctx.fillText('—  TAKE THE POSITION  —', W/2, 730);
-}
-function menuBtn(r, label, sub, warm){
-  rr(r.x, r.y, r.w, r.h, 4);
-  ctx.fillStyle = warm ? 'rgba(200,90,60,0.10)' : 'rgba(255,255,255,0.045)'; ctx.fill();
-  ctx.strokeStyle = warm ? 'rgba(224,138,90,0.45)' : 'rgba(190,165,110,0.32)';
-  ctx.lineWidth = 1.2; ctx.stroke();
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 15px Georgia, serif';
-  ctx.fillStyle = warm ? '#e0a084' : '#e0c98a';
-  ctx.fillText(label, r.x + r.w/2, r.y + (sub ? 21 : 28));
-  if(sub){
-    ctx.font = 'italic 11px Georgia, serif'; ctx.fillStyle = 'rgba(180,160,120,0.55)';
-    ctx.fillText(sub, r.x + r.w/2, r.y + 36);
-  }
-}
-function renderPauseMenu(){
-  ctx.fillStyle = 'rgba(6,5,4,0.88)'; ctx.fillRect(0,0,W,H);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 34px Georgia, serif';
-  ctx.fillText('THE BOARD IS WAITING', W/2, 236);
-  ctx.fillStyle = '#8a7546'; ctx.font = '15px Georgia, serif';
-  ctx.fillText('Day ' + day + ' · ' + clockStr() + ' · ' + stats.completed + ' put through, '
-             + stats.abandoned + ' of ' + ALLOW + ' lost', W/2, 272);
-  menuBtn(MENU.resume, 'BACK TO THE POSITION', 'escape');
-  menuBtn(MENU.help,   'OPERATING INSTRUCTIONS', 'H');
-  menuBtn(MENU.quit,   'GIVE UP THE SHIFT', 'Q  ·  the run ends here, back to day one', true);
-}
-
-const nameBox = document.getElementById('nameentry');
-nameBox.addEventListener('keydown', e => {
-  e.stopPropagation();
-  if(e.key === 'Enter'){ commitName(nameBox.value); hideNameBox(); mode = 'scores'; sfx.good(); }
-});
-function showNameBox(){
-  nameBox.value = '';
-  nameBox.style.display = 'block';
-  try{ nameBox.focus(); }catch(e){}
-}
-function hideNameBox(){
-  nameBox.style.display = 'none';
-  try{ nameBox.blur(); }catch(e){}
-}
-
-function renderNamePrompt(){
-  if(nameBox.style.display !== 'block') showNameBox();
-  ctx.fillStyle = '#0d0a07'; ctx.fillRect(0,0,W,H);
-  const g = ctx.createRadialGradient(W/2,330,20,W/2,330,520);
-  g.addColorStop(0,'rgba(255,180,90,0.10)'); g.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 34px Georgia, serif';
-  ctx.fillText('YOU ARE ON THE SHEET', W/2, 210);
-  ctx.fillStyle = '#bda878'; ctx.font = '17px Georgia, serif';
-  ctx.fillText('Day ' + pending.day + ' · ' + pending.done + ' calls put through · '
-             + pending.acc + '% of everything offered · as ' + DIFFS[pending.d].name.toLowerCase(),
-               W/2, 250);
-  ctx.fillStyle = 'rgba(255,200,120,0.9)'; ctx.font = 'bold 20px Georgia, serif';
-  ctx.fillText(ordinal(pending.rank) + ' place', W/2, 292);
-  ctx.fillStyle = 'rgba(190,170,130,0.65)'; ctx.font = 'italic 14px Georgia, serif';
-  ctx.fillText('Miss Pryor keeps a sheet of the girls who lasted. Put your name to it.', W/2, 332);
-
-  rr(SBACK.x, SBACK.y, SBACK.w, SBACK.h, 4);
-  ctx.fillStyle = 'rgba(255,200,120,0.09)'; ctx.fill();
-  ctx.strokeStyle = 'rgba(255,200,120,0.5)'; ctx.lineWidth = 1.4; ctx.stroke();
-  ctx.font = 'bold 14px Georgia, serif'; ctx.fillStyle = '#e8cf92';
-  ctx.fillText('SIGN IT', W/2, SBACK.y + 21);
-  ctx.fillStyle = 'rgba(150,130,95,0.5)'; ctx.font = 'italic 12px Georgia, serif';
-  ctx.fillText('or press return', W/2, SBACK.y + 46);
-}
-function ordinal(n){
-  const s = ['th','st','nd','rd'], v = n % 100;
-  return n + (s[(v-20)%10] || s[v] || s[0]);
-}
-function renderScores(){
-  ctx.fillStyle = '#0d0a07'; ctx.fillRect(0,0,W,H);
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 30px Georgia, serif';
-  ctx.fillText('THE RECORD SHEET', W/2, 70);
-  ctx.font = '13px Georgia, serif'; ctx.fillStyle = '#8a7546';
-  ctx.fillText('Verity Exchange · Position 4 · every night worked', W/2, 94);
-
-  const labels = ['ALL', ...DIFFS.map(d => d.name)];
-  for(let i=0;i<SFILT.length;i++){
-    const r = SFILT[i], on = scoreFilter === i-1;
+  /* everything else, quieter */
+  for(const c of titleChips()){
+    const r = c.rect, warm = c.key === 'tut' && tutorialOn;
     rr(r.x, r.y, r.w, r.h, 3);
-    ctx.fillStyle = on ? 'rgba(255,200,120,0.10)' : 'rgba(255,255,255,0.025)'; ctx.fill();
-    ctx.strokeStyle = on ? 'rgba(255,200,120,0.5)' : 'rgba(190,165,110,0.2)';
-    ctx.lineWidth = on ? 1.6 : 1; ctx.stroke();
-    ctx.font = 'bold 12px Georgia, serif';
-    ctx.fillStyle = on ? '#e8cf92' : 'rgba(170,150,110,0.55)';
-    ctx.fillText(labels[i], r.x + r.w/2, r.y + 20);
+    ctx.fillStyle = 'rgba(255,255,255,0.02)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(190,165,110,0.16)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = warm ? 'rgba(160,200,170,0.8)' : 'rgba(185,165,125,0.65)';
+    ctx.font = '12.5px Georgia, serif';
+    ctx.fillText(c.label, r.x + r.w/2, r.y + 21);
   }
-
-  const rows = scoreRows();
-  if(!rows.length){
-    ctx.font = 'italic 16px Georgia, serif'; ctx.fillStyle = 'rgba(180,160,120,0.5)';
-    ctx.fillText('Nothing on the sheet yet. Work a night and come back.', W/2, 300);
-  } else {
-    /* the three figures that matter */
-    const best = [
-      ['DAYS REACHED',       Math.max(...rows.map(r => r.day))],
-      ['CALLS IN A NIGHT',   Math.max(...rows.map(r => r.done))],
-      ['BEST ACCURACY',      Math.max(...rows.map(r => r.acc)) + '%']
-    ];
-    for(let i=0;i<3;i++){
-      const cx = W/2 - 300 + i*300;
-      ctx.font = 'bold 11px Georgia, serif'; ctx.fillStyle = '#8a7546';
-      ctx.fillText(best[i][0], cx, 194);
-      ctx.font = 'bold 40px Georgia, serif'; ctx.fillStyle = '#e8cf92';
-      ctx.fillText(String(best[i][1]), cx, 236);
-    }
-    const tot = rows.reduce((a,r) => ({ done:a.done+r.done, lost:a.lost+r.lost }), {done:0,lost:0});
-    ctx.font = '13px Georgia, serif'; ctx.fillStyle = 'rgba(190,170,130,0.7)';
-    ctx.fillText(rows.length + ' nights worked · ' + tot.done + ' calls put through · '
-               + (tot.done+tot.lost ? Math.round(tot.done/(tot.done+tot.lost)*100) : 0)
-               + '% of everything offered', W/2, 266);
-
-  }
-
-  /* the sheet proper: named runs, best first */
-  const lead = leaderRows();
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 11px Georgia, serif'; ctx.fillStyle = '#8a7546';
-  ctx.fillText('THE GIRLS WHO LASTED', W/2, 300);
-  if(!lead.length){
-    ctx.font = 'italic 15px Georgia, serif'; ctx.fillStyle = 'rgba(180,160,120,0.45)';
-    ctx.fillText('No names yet. A run goes on the sheet when the chief pulls you off the board.', W/2, 340);
-  } else {
-    const COL = [W/2-350, W/2-300, W/2-90, W/2+75, W/2+185, W/2+300];
-    const head = ['','NAME','SIGNED ON','DAY','CALLS','ACCURACY'];
-    ctx.font = 'bold 11px Georgia, serif'; ctx.fillStyle = '#8a7546';
-    for(let i=0;i<head.length;i++){ ctx.textAlign = i<3 ? 'left' : 'right'; ctx.fillText(head[i], COL[i], 322); }
-    ctx.strokeStyle = 'rgba(120,100,70,0.3)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(W/2-356, 330); ctx.lineTo(W/2+306, 330); ctx.stroke();
-    let y = 352;
-    lead.slice(0, LEADER_SLOTS).forEach((r, i) => {
-      const mine = pending && r.cid === pending.cid && r.name;
-      if(mine){
-        rr(W/2-356, y-15, 662, 22, 3);
-        ctx.fillStyle = 'rgba(255,200,120,0.10)'; ctx.fill();
-      }
-      const cells = [ordinal(i+1), r.name, DIFFS[r.d] ? DIFFS[r.d].name.toLowerCase() : '—',
-                     String(r.day), String(r.done), r.acc + '%'];
-      ctx.font = (mine ? 'bold ' : '') + '14px Georgia, serif';
-      for(let j=0;j<cells.length;j++){
-        ctx.textAlign = j<3 ? 'left' : 'right';
-        ctx.fillStyle = mine ? '#e8cf92' : (j === 0 ? '#8a7546' : 'rgba(200,180,135,0.8)');
-        ctx.fillText(cells[j], COL[j], y);
-      }
-      y += 24;
-    });
-    /* and where this run stood, whether or not it made the sheet */
-    if(pending){
-      y += 12;
-      ctx.textAlign = 'center'; ctx.font = 'italic 14px Georgia, serif';
-      ctx.fillStyle = pending.qualifies ? 'rgba(160,205,175,0.9)' : 'rgba(224,138,90,0.9)';
-      ctx.fillText(pending.qualifies
-        ? 'Your run stands ' + ordinal(pending.rank) + '.'
-        : 'Your run placed ' + ordinal(pending.rank) + ' — not far enough for the sheet. '
-          + 'Day ' + pending.day + ', ' + pending.done + ' calls, ' + pending.acc + '%.',
-        W/2, y);
-    }
-  }
-
-  ctx.textAlign = 'center';
-  rr(SBACK.x, SBACK.y, SBACK.w, SBACK.h, 4);
-  ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fill();
-  ctx.strokeStyle = 'rgba(190,165,110,0.3)'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.font = 'bold 14px Georgia, serif'; ctx.fillStyle = 'rgba(210,190,145,0.85)';
-  ctx.fillText(pending ? 'BEGIN AGAIN AT DAY ONE' : 'BACK', W/2, SBACK.y + 21);
+  ctx.fillStyle = 'rgba(160,142,105,0.5)'; ctx.font = 'italic 12px Georgia, serif';
+  ctx.fillText('H for the operating instructions · 1, 2, 3 to sign on · T for the walk-through',
+    W/2, 748);
 }
 function renderReport(){
   ctx.fillStyle = 'rgba(6,5,4,0.94)'; ctx.fillRect(0,0,W,H);
