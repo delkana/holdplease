@@ -3,8 +3,5 @@ node_modules/
 .DS_Store
 *.log
 
-# your sound files stay local unless you choose to commit them
-# (.railwayignore keeps them in the deploy even though git skips them)
-audio/**/*.mp3
-audio/**/*.ogg
-audio/**/*.wav
+# sound files ARE tracked: railway up only uploads what git tracks, so
+# ignoring them silently left them out of the deploy
