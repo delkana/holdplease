@@ -2,3 +2,9 @@ node_modules/
 .claude/
 .DS_Store
 *.log
+
+# your sound files stay local unless you choose to commit them
+audio/*.mp3
+audio/*.ogg
+audio/*.wav
+audio/voice/
