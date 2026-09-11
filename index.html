@@ -1,0 +1,2413 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hold, Please</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0806;overflow:hidden;
+    overscroll-behavior:none;-webkit-user-select:none;user-select:none;}
+  body{display:flex;align-items:center;justify-content:center;}
+  canvas{max-width:100vw;max-height:100vh;touch-action:none;
+    -webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;}
+  #nameentry{display:none;position:fixed;left:50%;top:50%;
+    transform:translate(-50%,-50%);width:min(72vw,360px);
+    padding:11px 16px;box-sizing:border-box;
+    font:600 21px Georgia,serif;letter-spacing:1px;text-align:center;
+    color:#e8cf92;background:rgba(18,13,9,0.97);caret-color:#e8cf92;
+    border:1px solid rgba(255,200,120,0.55);border-radius:4px;outline:none;
+    -webkit-user-select:text;user-select:text;}
+  #nameentry::placeholder{color:rgba(190,170,130,0.35);letter-spacing:0;font-style:italic;}
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="800"></canvas>
+<input id="nameentry" maxlength="14" autocomplete="off" autocapitalize="characters"
+       spellcheck="false" placeholder="your name">
+<script>
+"use strict";
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const W = 1280, H = 800;
+
+/* ---------------------------------------------------------------- audio */
+let AC = null, master = null;
+let vol = 0.7, muted = false, volDrag = false;
+try{
+  const s = JSON.parse(localStorage.getItem('holdplease.audio') || 'null');
+  if(s){ vol = Math.min(1, Math.max(0, +s.v || 0)); muted = !!s.m; }
+}catch(e){}
+function saveAudio(){ try{ localStorage.setItem('holdplease.audio', JSON.stringify({v:vol, m:muted})); }catch(e){} }
+function applyVol(){ if(master) master.gain.value = muted ? 0 : vol; }
+function ac(){
+  if(!AC){
+    try{
+      AC = new (window.AudioContext||window.webkitAudioContext)();
+      master = AC.createGain(); master.connect(AC.destination); applyVol();
+    }catch(e){}
+  }
+  return AC;
+}
+function noise(dur, g, type, freq, q, delay){
+  const A = ac(); if(!A) return;
+  const n = Math.max(1,(A.sampleRate*dur)|0);
+  const buf = A.createBuffer(1, n, A.sampleRate), d = buf.getChannelData(0);
+  for(let i=0;i<n;i++) d[i] = (Math.random()*2-1)*(1-i/n);
+  const src = A.createBufferSource(); src.buffer = buf;
+  const f = A.createBiquadFilter(); f.type = type||'bandpass'; f.frequency.value = freq||1200; f.Q.value = q||1;
+  const gn = A.createGain(); gn.gain.value = g;
+  src.connect(f); f.connect(gn); gn.connect(master);
+  src.start(A.currentTime + (delay||0));
+}
+function beep(freq, dur, g, type, delay){
+  const A = ac(); if(!A) return;
+  const t = A.currentTime + (delay||0);
+  const o = A.createOscillator(), gn = A.createGain();
+  o.type = type||'sine'; o.frequency.value = freq;
+  o.connect(gn); gn.connect(master);
+  gn.gain.setValueAtTime(0.0001, t);
+  gn.gain.exponentialRampToValueAtTime(Math.max(0.0002,g), t+0.006);
+  gn.gain.exponentialRampToValueAtTime(0.0001, t+0.006+dur);
+  o.start(t); o.stop(t+dur+0.06);
+}
+const sfx = {
+  lamp(){ noise(0.03, 0.09, 'highpass', 3000); },
+  click(){ noise(0.02, 0.24, 'bandpass', 2400, 3); },
+  dbl(){ noise(0.02, 0.24, 'bandpass', 2400, 3); setTimeout(()=>noise(0.02,0.22,'bandpass',2200,3), 95); },
+  /* a plug going home in a jack: the slide in, the sleeve bottoming out, brass on brass */
+  thunk(big){
+    const p = big ? 0.86 : 1;                       /* trunk jacks are deeper */
+    noise(0.028, 0.15, 'highpass', 2800);
+    noise(0.080, 0.34, 'lowpass',  700*p, 1, 0.012);
+    beep(108*p,  0.090, 0.20,  'triangle', 0.012);
+    beep(162*p,  0.055, 0.085, 'sine',     0.016);
+    beep(2400*p, 0.045, 0.030, 'sine',     0.018);
+    beep(3250*p, 0.030, 0.018, 'sine',     0.020);
+  },
+  snap(){ noise(0.16, 0.20, 'highpass', 1400); beep(340, 0.10, 0.05, 'sawtooth'); },
+  snag(){ noise(0.24, 0.10, 'bandpass', 460, 1.2); },
+  /* the cord running back through its guide as the weight takes it down */
+  reel(dur, d){
+    const A = ac(); if(!A) return;
+    const n = Math.max(1,(A.sampleRate*dur)|0);
+    const buf = A.createBuffer(1, n, A.sampleRate), out = buf.getChannelData(0);
+    for(let i=0;i<n;i++){
+      const k = i/n;
+      out[i] = (Math.random()*2-1) * (1 - k*0.8) * (0.62 + 0.38*Math.sin(k*110));
+    }
+    const src = A.createBufferSource(); src.buffer = buf;
+    const f = A.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.7;
+    const t = A.currentTime;
+    f.frequency.setValueAtTime(2300, t);
+    f.frequency.exponentialRampToValueAtTime(480, t + dur);
+    const g = A.createGain();
+    g.gain.setValueAtTime(Math.min(0.15, 0.045 + d/7000), t);
+    g.gain.exponentialRampToValueAtTime(0.0006, t + dur);
+    src.connect(f); f.connect(g); g.connect(master); src.start();
+  },
+  /* and the plug dropping into its spring at the end of the run */
+  seat(){ noise(0.055, 0.22, 'lowpass', 640); beep(94, 0.085, 0.10, 'triangle'); },
+  err(){ beep(196, 0.30, 0.14, 'square'); beep(147, 0.34, 0.10, 'square', 0.02); },
+  good(){ beep(660, 0.09, 0.07); beep(880, 0.10, 0.05, 'sine', 0.07); },
+  slip(){ noise(0.13, 0.14, 'highpass', 2600); beep(520, 0.07, 0.05, 'triangle'); },
+  trunk(){ beep(300, 0.5, 0.05, 'sawtooth'); beep(452, 0.5, 0.04, 'sawtooth', 0.01); },
+  bell(){ for(let i=0;i<4;i++) beep(1180, 0.5, 0.09, 'sine', i*0.22); },
+  /* a hand hovering over the hook: you have about three seconds */
+  about(){ beep(1760, 0.045, 0.045, 'sine'); beep(1760, 0.045, 0.04, 'sine', 0.095); },
+  /* a receiver going back on its hook, and the line falling away without you */
+  lost(){
+    noise(0.05, 0.26, 'lowpass', 850);
+    beep(392, 0.09, 0.07, 'triangle', 0.02);
+    beep(294, 0.14, 0.08, 'triangle', 0.09);
+    beep(196, 0.40, 0.10, 'sine',     0.19);
+  },
+  /* the chief operator reaching past you to pull the cords */
+  dismissed(){
+    noise(0.5, 0.16, 'lowpass', 400);
+    beep(196, 0.55, 0.13, 'square');
+    beep(147, 0.70, 0.12, 'square', 0.14);
+    beep(98,  1.10, 0.15, 'square', 0.34);
+  }
+};
+let ringNodes = null;
+function ringOn(){
+  const A = ac(); if(!A || ringNodes) return;
+  const g = A.createGain(); g.gain.value = 0.055;
+  const lfo = A.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 19;
+  const lg = A.createGain(); lg.gain.value = 0.05;
+  lfo.connect(lg); lg.connect(g.gain);
+  const o1 = A.createOscillator(); o1.type='sine'; o1.frequency.value = 420;
+  const o2 = A.createOscillator(); o2.type='sine'; o2.frequency.value = 505;
+  o1.connect(g); o2.connect(g); g.connect(master);
+  o1.start(); o2.start(); lfo.start();
+  ringNodes = {g,o1,o2,lfo};
+}
+function ringOff(){
+  if(!ringNodes) return;
+  const {g,o1,o2,lfo} = ringNodes; ringNodes = null;
+  try{
+    const t = ac().currentTime;
+    g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(0, t);
+    o1.stop(t+0.05); o2.stop(t+0.05); lfo.stop(t+0.05);
+  }catch(e){}
+}
+
+/* ---------------------------------------------------------------- data */
+/* a string is a private line; an array is a party line sharing one wire */
+const SUBS = [
+  ['11','Doc Reilly'],      ['14','Sheriff Doyle'],   ['17','Western Union'],
+  ['21','Mabel Kranz'],     ['24','The Rectory'],
+  ['28',['Ivy Hendricks','Rose Hendricks','Nadine Fisk']],
+  ['31','Verity Herald'],   ['33','Feed & Grain'],
+  ['36',['Kessler Farm','Tuck Renner']],
+  ['42','Odeon Theatre'],   ['45',"Lou's Garage"],    ['47','Bank of Verity'],
+  ['51','Alma Pryor'],      ['54','Union Depot'],     ['57',"Hoyt's Drug"],
+  ['62',['Hattie Doss','Ada Mullen','Cleo Barrow']],
+  ['65','Claypool Bros'],   ['68','Elks Lodge'],
+  ['71',['Sig Ledbetter','Orpha Vance']],
+  ['74','Grange Hall'],     ['77','Fire Hall'],
+  ['82',['Merle Tandy','June Tandy','Arch Pettit']],
+  ['85','Verity Creamery'],
+  ['88',['Bram Sowell','Etta Sowell']]
+];
+const NSUB = SUBS.length, NTRUNK = 3;
+/* ring codes by position on the party line — long, two shorts, long-short */
+const CODES = [ ['L'], ['S','S'], ['L','S'] ];
+const TOWNS = ['Ashbury','Granton','Millvale','Cold Spring'];
+
+const ONES = ['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven',
+              'twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+const TENS = ['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+function words(n){ n = +n; if(n < 20) return ONES[n]; const o = n%10; return o ? TENS[(n/10)|0]+'-'+ONES[o] : TENS[(n/10)|0]; }
+function digits(s){ return String(s).split('').map(d => ONES[+d]).join('-'); }
+function shortName(n){
+  const p = n.split(' ');
+  return p.length > 1 ? p[0] + ' ' + p[p.length-1][0] + '.' : n;
+}
+
+const INQUIRIES = [
+  "What time have you got, operator?",
+  "Is the Odeon showing tonight, do you know?",
+  "Any word on the Kessler road being open?",
+  "Just testing my line, dear. Sorry to trouble you.",
+  "Has Doc Reilly come back into town yet?",
+  "Is that snow they're calling for, or rain?"
+];
+const FRAGMENTS = [
+  "...she's not to know. Do you hear me...",
+  "...forty dollars by Friday or he takes the truck...",
+  "...I told Ray I'd wait, but I won't wait forever...",
+  "...the note came due in August, Harold...",
+  "...he's been coughing like that since Tuesday...",
+  "...don't say a word to your mother...",
+  "...I saw whose car it was. I saw it plain...",
+  "...if the rain holds off we'll get the north field in...",
+  "...she said yes. Ivy, she said yes...",
+  "...they're closing the line to Ashbury in the spring...",
+  "...tell him the operator can hear, for God's sake..."
+];
+/* what you hear when a neighbour lifts their receiver on a party line */
+const SNOOPS = [
+  "...(a second receiver comes off the hook)...",
+  "...get off this line, Etta, I can hear you breathing...",
+  "...is that you listening, June? I know it's you...",
+  "...(somebody on the line, not saying a word)..."
+];
+const CHIEF = [
+  [4.0, "Miss Pryor initialled your sheet without comment. That is the highest praise this exchange offers."],
+  [6.5, "“Steady hands. But you leave your cords down too long — a pair on the board is a pair you have not got.”"],
+  [9.5, "“You are keeping this town waiting. Answer the lamp that lit first, not the one nearest your hand.”"],
+  [999, "“I have put Ruth back on this position for Friday. Come and see me before your next shift.”"]
+];
+
+/* ---------------------------------------------------------------- geometry */
+const JACK = { x0:40, y0:44, w:1200, h:354, cols:8 };
+const CELLW = JACK.w / JACK.cols;
+const ROWY = [96, 176, 256];
+const TRUNKY = 352, TRUNKX = [115, 250, 385];
+const RAIL = { x:470, y:320, w:770, h:68, slots:5 };
+const SHELF_Y = 406;
+const SPRINGY = 468, SUPY = 508, KEYY = 532, KEYH = 52, TICKY = 596, TICKH = 118;
+const NPAIRS = 8, FRONTDX = -30, BACKDX = 30;
+const SHIFT_LEN = 300;               /* five real minutes at the position... */
+const SHIFT_START = 16*60;           /* ...from four in the afternoon... */
+const SHIFT_HOURS = 5;               /* ...through the supper hour to nine */
+const LONG_HOLD = 0.55, PATTERN_GAP = 1.05;
+
+/* ------------------------------------------------- one tempo, for everybody
+   The board keeps the same pace whatever you are signed on as. Only the day
+   changes that. What follows changes what the board TELLS you, and how hard
+   it judges you — nothing else. */
+const SPAWN0 = 34, SPAWN1 = 15;      /* seconds between calls, first of the shift to last */
+const PAT0   = 34, PAT1   = 20;      /* how long a caller holds on before giving up */
+const TALK0  = 20, TALK1  = 25;      /* how long a local conversation runs */
+const TOLL0  = 30, TOLL1  = 25;      /* and a long-distance one */
+const GRACE  = 45;                   /* plain local calls only, this far into a shift */
+const ALLOW  = 5;                    /* lost calls in a night before the run is over */
+
+/* ------------------------------------------------- what goes wrong, and when
+   From day two the exchange starts having a bad week: three nights each with
+   one thing out of order, then a clear night, then round again in a fresh
+   order. Which trouble falls on which night is fixed for a given block, so a
+   night is learnable; which pair or trunk it hits is not. */
+const TROUBLE = ['cord', 'trunk', 'long'];
+const GIVEUP_WARN = 3;               /* seconds of warning before somebody rings off */
+const LONG0 = 120, LONG1 = 40;       /* real seconds — a five minute shift is five in-game hours */
+function blockOrder(block){
+  const a = [0,1,2];
+  let s = (block + 1) >>> 0;                   /* avalanche, or neighbouring blocks come out alike */
+  s = Math.imul(s ^ (s >>> 16), 2246822507) >>> 0;
+  s = Math.imul(s ^ (s >>> 13), 3266489909) >>> 0;
+  s = (s ^ (s >>> 16)) >>> 0;
+  const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+  for(let i = 2; i > 0; i--){ const j = (rnd() * (i+1))|0; const t = a[i]; a[i] = a[j]; a[j] = t; }
+  return a;
+}
+/* people, as opposed to equipment. Same three-on then one-off rota, shuffled
+   independently so the night's trouble and the night's caller vary together. */
+/* two sets of three. The first set falls on days 2-4, the second on 5-7,
+   each shuffled within its own block, and the eighth night is clear. */
+const ENC_A = ['nothome', 'lonely', 'child'];
+const ENC_B = ['police', 'debt', 'mother'];
+const ENCOUNTERS = ENC_A.concat(ENC_B, ['eavesdrop']);
+const CHILD_ERRANDS = [
+  ['mama’s gone to the pictures', '42'],
+  ['papa’s at the garage with the truck', '45'],
+  ['mama went to the drug store', '57'],
+  ['papa’s down at the feed store', '33'],
+  ['mama’s helping up at the church', '24']
+];
+function encounterFor(d){
+  if(d < 2) return null;
+  const i = (d - 2) % 8, block = ((d - 2) / 8) | 0;
+  if(i === 7) return null;                       /* the clear night */
+  if(i === 6) return 'eavesdrop';                /* always the eighth night */
+  return i < 3 ? ENC_A[blockOrder(block + 977)[i]]
+               : ENC_B[blockOrder(block + 4231)[i - 3]];
+}
+function troubleFor(d){
+  if(d < 2) return null;                       /* the first night is clean */
+  const i = (d - 2) % 4;
+  if(i === 3) return null;                     /* and every fourth after that */
+  return TROUBLE[blockOrder(((d - 2) / 4) | 0)[i]];
+}
+
+const DIFFS = [
+  { key:'learner', name:'LEARNER',
+    blurb:'Somebody at your shoulder. The board marks which lines are busy and rings the one they asked for, and nothing goes on your sheet.',
+    warn:true,  targetGlow:true,  busyVisible:true,  pryor:false, marks:false },
+  { key:'operator', name:'OPERATOR',
+    blurb:'You work the position yourself. Busy lines go back to being invisible, the sheet is kept, and Miss Pryor walks the aisle.',
+    warn:true,  targetGlow:true,  busyVisible:false, pryor:true,  marks:true },
+  { key:'alone', name:'NO ALLOWANCES',
+    blurb:'Nothing is shown and nothing is forgiven. You find every jack yourself, by number or by name, with no help from the board.',
+    warn:false, targetGlow:false, busyVisible:false, pryor:true,  marks:true }
+];
+let diff = 0;
+try{ const d = +localStorage.getItem('holdplease.diff'); if(d >= 0 && d < DIFFS.length) diff = d; }catch(e){}
+let D = DIFFS[diff];
+function setDiff(i){
+  diff = Math.max(0, Math.min(DIFFS.length-1, i)); D = DIFFS[diff];
+  try{ localStorage.setItem('holdplease.diff', String(diff)); }catch(e){}
+}
+/* a mark against you is only recorded once you are off the learner's sheet */
+function mark(){ if(D.marks) stats.errors++; }
+
+/* the days. Day one is the baseline; every night after runs 5% thicker than
+   the one before, so the board slowly outgrows you. */
+const DAY_STEP = 1.05;
+const WEEKDAYS = ['Thursday','Friday','Saturday','Sunday','Monday','Tuesday','Wednesday'];
+let day = 1;
+try{ const v = +localStorage.getItem('holdplease.day'); if(v >= 1 && v <= 9999) day = Math.floor(v); }catch(e){}
+function saveDay(){ try{ localStorage.setItem('holdplease.day', String(day)); }catch(e){} }
+const paceFor = d => Math.pow(DAY_STEP, d - 1);
+const pace = () => paceFor(day);
+function nextDay(){ day++; saveDay(); }
+
+/* ---- the record sheet: one line per night worked, kept between sessions ---- */
+let scores = [];
+try{ const raw = JSON.parse(localStorage.getItem('holdplease.scores') || '[]');
+     if(Array.isArray(raw)) scores = raw; }catch(e){ scores = []; }
+let scoreFilter = -1;                       /* -1 all, else a tier index */
+function saveScores(){
+  try{ localStorage.setItem('holdplease.scores', JSON.stringify(scores.slice(-200))); }catch(e){}
+}
+function recordShift(){
+  const done = stats.completed, lost = stats.abandoned;
+  scores.push({ d: diff, day: day, done, lost, marks: stats.errors,
+                acc: (done + lost) ? Math.round(done / (done + lost) * 100) : 0,
+                failed: !!stats.failed });
+  if(scores.length > 200) scores = scores.slice(-200);
+  saveScores();
+  career.done += done; career.lost += lost; career.nights++;
+  saveCareer();
+}
+const scoreRows = () => scoreFilter < 0 ? scores : scores.filter(r => r.d === scoreFilter);
+
+/* ---- the leaderboard: one line per career, written when you are pulled off ---- */
+const LEADER_SLOTS = 10;
+let leaders = [];
+try{ const raw = JSON.parse(localStorage.getItem('holdplease.leaders') || '[]');
+     if(Array.isArray(raw)) leaders = raw; }catch(e){ leaders = []; }
+let careerId = 0;
+try{ careerId = +localStorage.getItem('holdplease.career') || 0; }catch(e){}
+let career = { done:0, lost:0, nights:0 };
+try{ const c = JSON.parse(localStorage.getItem('holdplease.careerstats') || 'null');
+     if(c && typeof c.done === 'number') career = c; }catch(e){}
+function saveCareer(){
+  try{
+    localStorage.setItem('holdplease.career', String(careerId));
+    localStorage.setItem('holdplease.careerstats', JSON.stringify(career));
+  }catch(e){}
+}
+function newCareer(){ careerId = Date.now(); career = { done:0, lost:0, nights:0 }; saveCareer(); }
+if(!careerId) newCareer();
+function saveLeaders(){
+  try{ localStorage.setItem('holdplease.leaders', JSON.stringify(leaders.slice(0,25))); }catch(e){}
+}
+const beats = (a,b) => a.day > b.day || (a.day === b.day &&
+                       (a.done > b.done || (a.done === b.done && a.acc > b.acc)));
+function sortLeaders(){ leaders.sort((a,b) => beats(a,b) ? -1 : (beats(b,a) ? 1 : 0)); }
+/* where this run would stand, ignoring the entry this same career already holds */
+function wouldRank(e){
+  let n = 1;
+  for(const l of leaders) if(l.cid !== e.cid && beats(l, e)) n++;
+  return n;
+}
+function leaderRows(){
+  sortLeaders();
+  return scoreFilter < 0 ? leaders : leaders.filter(l => l.d === scoreFilter);
+}
+let pending = null;           /* the run just ended, waiting to be named or just shown */
+/* a run is over: the sheet gets it, and the career goes back to the bottom */
+function endRun(walked){
+  stats.failed = true; stats.walked = !!walked;
+  ringOff(); sfx.dismissed();
+  recordShift(); onDismissed(); resetDays();
+  mode = 'report';
+}
+function onDismissed(){
+  const done = career.done, lost = career.lost;
+  pending = { cid: careerId, name: '', d: diff, day: day, done, lost,
+              acc: (done + lost) ? Math.round(done / (done + lost) * 100) : 0 };
+  pending.rank = wouldRank(pending);
+  pending.qualifies = pending.rank <= LEADER_SLOTS;
+}
+function commitName(raw){
+  const name = (raw || '').trim().slice(0, 14) || 'ANON';
+  pending.name = name;
+  leaders = leaders.filter(l => l.cid !== pending.cid);   /* one line per career */
+  leaders.push(pending);
+  sortLeaders();
+  leaders = leaders.slice(0, 25);
+  saveLeaders();
+}
+function resetDays(){ day = 1; saveDay(); newCareer(); }
+const weekdayOf = d => WEEKDAYS[(d - 1) % WEEKDAYS.length];
+const thicker = d => Math.round((paceFor(d) - 1) * 100);
+
+/* ---------------------------------------------------------------- the walk-through */
+let tutorialOn = true;
+try{ if(localStorage.getItem('holdplease.tut') === '0') tutorialOn = false; }catch(e){}
+function saveTut(){ try{ localStorage.setItem('holdplease.tut', tutorialOn ? '1' : '0'); }catch(e){} }
+
+const TUT = [
+  { text: c => 'Number ' + lines[c.from].num + ' has lifted their receiver — that is what a lit lamp means. '
+             + 'Drag the FRONT plug of a free pair (the left one, red cord) up into the ' + lines[c.from].num + ' jack.',
+    done: c => c.phase !== 'lamp' },
+  { text: () => 'You are joined to them now, but you cannot hear a word until you throw the LISTENING key. '
+              + 'Click the LSN key under that pair — or press the pair’s number, 1 through 8.',
+    done: c => c.heardIt },
+  { text: c => 'They want ' + lines[c.want].num + '. Take the BACK plug (the right one, blue cord) and hold it over the '
+             + lines[c.want].num + ' jack for a moment. That flick-test is the only way to learn a line is busy.',
+    done: () => tut.tested || tut.plugged },
+  { text: c => 'Free — you would have heard a double click if it were not. Drop the plug into ' + lines[c.want].num + '.',
+    done: () => tut.plugged },
+  { text: () => 'Now HOLD the RINGING key until they answer — click and hold RNG, or hold Q through I for that pair. '
+              + 'A short jab will not fetch anybody to the telephone.',
+    done: () => tut.wasLive || tut.wasHung || tut.tookDown },
+  { text: () => 'They are talking. Release the LISTENING key: once a call is connected it is no longer yours to hear, '
+              + 'and Miss Pryor walks the aisle.',
+    done: (c,p) => !p || !p.listen || tut.wasHung || tut.tookDown },
+  { text: () => 'Leave them to it. The two small lamps beneath the pair will light when both parties hang up — '
+              + 'that is your only signal that the pair is yours again.',
+    done: () => tut.wasHung || tut.tookDown },
+  { text: () => 'Both lamps lit. Pull both plugs back down to their springs. A cord left down is a pair you have not got.',
+    done: () => tut.tookDown }
+];
+const TUT_END = 'That is the whole of it — the rest is those same few things, faster, and with more lamps than you have hands.'
+              + ' Nobody else will wait as patiently as that.';
+
+/* ---------------------------------------------------------------- state */
+let lines, trunks, pairs, calls, callbacks, drag, floats, msgs, stats, retracts;
+let mode, shiftT, spawnT, bgT, trunkT, heard, mouse, help;
+let tut, graceUntil, playFrom;
+let trouble = null, longAt = null, stuckTrunk = -1;
+let encounter = null, encPlan = [], childErrand = null, eavesHeard = false;
+let paused = false;
+
+function reset(){
+  lines = SUBS.map((s,i)=>{
+    const c = i % JACK.cols, r = (i / JACK.cols)|0;
+    const party = Array.isArray(s[1]);
+    return { id:i, num:s[0], party, trunk:false,
+             members: (party ? s[1] : [s[1]]).map((n,mi)=>({ name:n, code: party ? CODES[mi] : null })),
+             name: party ? ('line '+s[0]) : s[1],
+             x: 40 + CELLW/2 + c*CELLW, y: ROWY[r],
+             plug:null, state:'idle', busyUntil:0, ringT:0, lampT:0, snoop:false };
+  });
+  trunks = [];
+  for(let i=0;i<NTRUNK;i++){
+    const t = { id: NSUB+i, num:'T'+(i+1), party:false, trunk:true, members:[], name:'TRUNK '+(i+1),
+                x: TRUNKX[i], y: TRUNKY, plug:null, state:'idle', busyUntil:0, ringT:0, lampT:0, snoop:false };
+    lines.push(t); trunks.push(t);
+  }
+  pairs = [];
+  for(let i=0;i<NPAIRS;i++) pairs.push({
+    id:i, x: 40 + CELLW/2 + i*CELLW, front:null, back:null,
+    listen:false, ring:false, ringSrc:null, ringDownAt:null, pattern:[], lastRelease:null,
+    call:null, answerEnd:'front'
+  });
+  calls = []; callbacks = []; drag = null; floats = []; msgs = []; heard = []; retracts = [];
+  stats = { answered:0, answerSum:0, completed:0, abandoned:0, errors:0, best:999,
+            toll:0, kept:0, broken:0, failed:false, walked:false, warned:false };
+  shiftT = 0; spawnT = 2.5; bgT = 4.0; trunkT = 14; help = false;
+  mouse = { x:0, y:0 };
+  trouble = troubleFor(day); longAt = null; stuckTrunk = -1;
+  if(trouble === 'cord'){
+    /* one pair away for repair — announced, because you would be told */
+    const b = (Math.random()*NPAIRS)|0;
+    pairs[b].broken = true;
+    msgs.push({ text: 'Pair ' + (b+1) + ' is out of order tonight — the cords have gone for repair.',
+                t: 0, bad: true });
+  } else if(trouble === 'trunk'){
+    /* a trunk held down by another position; its lamp says so, nobody tells you */
+    stuckTrunk = (Math.random()*NTRUNK)|0;
+    trunks[stuckTrunk].busyUntil = SHIFT_LEN * 0.86;
+  } else if(trouble === 'long'){
+    /* somebody who is going to settle in; you find out when they do */
+    longAt = 25 + Math.random() * SHIFT_LEN * 0.45;
+  }
+  encounter = encounterFor(day); encPlan = []; childErrand = null;
+  const at = (a,b) => SHIFT_LEN * (a + Math.random()*(b-a));
+  if(encounter === 'nothome'){
+    encPlan = [{ at: at(0.12,0.22), step:0 }, { at: at(0.45,0.65), step:1 }];
+  } else if(encounter === 'lonely'){
+    encPlan = [{ at: at(0.22,0.52), step:0 }];
+  } else if(encounter === 'child'){
+    encPlan = [{ at: at(0.30,0.60), step:0 }];
+    childErrand = CHILD_ERRANDS[(Math.random()*CHILD_ERRANDS.length)|0];
+  } else if(encounter === 'police'){
+    encPlan = [{ at: at(0.10,0.20), step:0 }, { at: at(0.42,0.62), step:1 }];
+  } else if(encounter === 'debt'){
+    encPlan = [{ at: at(0.16,0.26), step:0 }, { at: at(0.44,0.54), step:1 },
+               { at: at(0.68,0.80), step:2 }];
+  } else if(encounter === 'mother'){
+    encPlan = [{ at: at(0.28,0.55), step:0 }];
+  } else if(encounter === 'eavesdrop'){
+    encPlan = [{ at: at(0.10,0.18), step:0 }, { at: at(0.34,0.46), step:1 },
+               { at: at(0.68,0.80), step:2 }];
+    eavesHeard = false;
+  }
+  tut = tutorialOn ? { i:0, call:null, finished:false, doneAt:0,
+                       tested:false, plugged:false, wasLive:false, wasHung:false, tookDown:false } : null;
+  playFrom = 0; graceUntil = GRACE;
+}
+function begin(){ reset(); paused = false; mode = 'play'; }
+/* hold the board still while the walk-through gets its first call connected */
+const tutHold = () => !!tut && !tut.finished && tut.i < 5;
+const now = () => shiftT;
+function heardAdd(t){ if(!heard.includes(t)) heard.push(t); }
+function say(text, bad){ msgs.push({text, t:0, bad:!!bad}); if(msgs.length>3) msgs.shift(); }
+
+/* ---------------------------------------------------------------- helpers */
+function lineBusy(l){ return !!l.plug || l.state === 'calling' || now() < l.busyUntil; }
+function allTrunksBusy(){ return trunks.every(lineBusy); }
+function endLine(p, e){ return e === 'front' ? p.front : p.back; }
+function setEnd(p, e, v){ if(e === 'front') p.front = v; else p.back = v; }
+const otherEnd = e => e === 'front' ? 'back' : 'front';
+function springPos(p, e){ return { x: p.x + (e === 'front' ? FRONTDX : BACKDX), y: SPRINGY }; }
+function dragging(p, e){ return drag && drag.pair === p.id && drag.end === e && drag.active; }
+/* the weight under the shelf hauls a freed plug back down to its spring */
+function retractOf(p, e){ return retracts.find(r => r.pair === p.id && r.end === e); }
+function retractPos(r){
+  const s = springPos(pairs[r.pair], r.end);
+  const k = Math.min(1, r.t / r.dur);
+  /* ease-out-back: the weight hauls it down, past the spring, and it settles */
+  const u = k - 1, c1 = 1.1, c3 = c1 + 1;
+  const e = 1 + c3*u*u*u + c1*u*u;
+  return { x: r.x0 + (s.x - r.x0)*e, y: r.y0 + (s.y - r.y0)*e };
+}
+function startRetract(p, e, x, y){
+  const s = springPos(p, e), d = Math.hypot(x - s.x, y - s.y);
+  if(d < 14){ sfx.seat(); return; }        /* already home; just the knock */
+  const dur = 0.28 + Math.min(0.18, d/2600);
+  retracts.push({ pair:p.id, end:e, x0:x, y0:y, t:0, dur });
+  sfx.reel(dur, d);
+}
+function plugPos(p, e){
+  if(dragging(p,e)) return { x: drag.x, y: drag.y };
+  const l = endLine(p,e);
+  if(l != null) return { x: lines[l].x, y: lines[l].y };
+  const r = retractOf(p, e);
+  return r ? retractPos(r) : springPos(p,e);
+}
+function cordCtrl(a, b){
+  return { x: (a.x+b.x)/2, y: (a.y+b.y)/2 + Math.min(96, 44 + Math.abs(a.x-b.x)*0.10) };
+}
+function activeCords(){
+  const out = [];
+  for(const p of pairs) for(const e of ['front','back']){
+    if(endLine(p,e) == null && !dragging(p,e)) continue;
+    out.push({ p, e, a: springPos(p,e), b: plugPos(p,e) });
+  }
+  return out;
+}
+function segInt(p1,p2,p3,p4){
+  const d = (p4.y-p3.y)*(p2.x-p1.x) - (p4.x-p3.x)*(p2.y-p1.y);
+  if(Math.abs(d) < 1e-6) return null;
+  const ua = ((p4.x-p3.x)*(p1.y-p3.y) - (p4.y-p3.y)*(p1.x-p3.x)) / d;
+  const ub = ((p2.x-p1.x)*(p1.y-p3.y) - (p2.y-p1.y)*(p1.x-p3.x)) / d;
+  if(ua < 0 || ua > 1 || ub < 0 || ub > 1) return null;
+  return { x: p1.x + ua*(p2.x-p1.x), y: p1.y + ua*(p2.y-p1.y) };
+}
+function crossings(){
+  const cs = activeCords(), out = [];
+  for(let i=0;i<cs.length;i++) for(let j=i+1;j<cs.length;j++){
+    const hit = segInt(cs[i].a, cs[i].b, cs[j].a, cs[j].b);
+    if(hit) out.push(hit);
+  }
+  return out;
+}
+function crossCountFor(p, e){
+  const cs = activeCords(), me = cs.find(c => c.p === p && c.e === e);
+  if(!me) return 0;
+  let n = 0;
+  for(const c of cs) if(c !== me && segInt(me.a, me.b, c.a, c.b)) n++;
+  return n;
+}
+/* fingers need bigger targets than a cursor, and the nearest one rather than the first */
+let touchMode = false;
+const TOUCH_LIFT = 36;                       /* draw the held plug above the fingertip */
+const plugHitR = () => touchMode ? 30 : 17;
+const jackHitR = () => touchMode ? 27 : 15;
+const keyPad   = () => touchMode ? 8 : 0;
+function jackAt(x,y){
+  let best = null, bd = jackHitR()**2;
+  for(const l of lines){ const d = (x-l.x)**2 + (y-l.y)**2; if(d < bd){ bd = d; best = l; } }
+  return best;
+}
+function supLit(p, e){
+  const l = endLine(p,e);
+  if(l == null || dragging(p,e)) return false;
+  const c = p.call;
+  if(!c) return true;                                   /* a stranger, on the hook */
+  if(c.phase === 'callback') return true;                /* we are ringing them; not yet up */
+  if(c.phase === 'answered') return e !== c.answerEnd;   /* caller off-hook, far end is not */
+  if(c.phase === 'live') return false;
+  return true;
+}
+/* seconds before this caller gives up, or null if nothing is running out */
+function patienceLeft(c){
+  if(c.phase === 'lamp') return c.patience - (now() - c.litAt);
+  if(c.phase !== 'answered' || c.resolved) return null;
+  if(!c.heardIt) return 24 - (now() - c.answeredAt);
+  return 46 - c.sinceHeard;
+}
+function canTakeDown(c){ return c.phase === 'hungup' || (c.phase === 'answered' && c.resolved); }
+/* which line the ringing key is calling: a callback rings the subscriber themselves */
+function ringTarget(p, c){
+  if(!c) return null;
+  return endLine(p, c.phase === 'callback' ? c.answerEnd : otherEnd(c.answerEnd));
+}
+function wantLabel(c){
+  if(c.toll) return c.town.toUpperCase() + ' ' + c.tollNum;
+  if(c.inquiry) return 'no connection';
+  const w = lines[c.want];
+  if(w.party) return w.members[c.wantMember].name;
+  return c.askedBy === 'number' ? w.num : w.name;
+}
+function codeEq(a, b){ return a.length === b.length && a.every((v,i) => v === b[i]); }
+
+/* ---------------------------------------------------------------- calls */
+function freeLine(){
+  const pool = lines.filter(l => !l.trunk && l.state === 'idle' && !l.plug
+                             && now() >= l.busyUntil && !callbacks.some(cb => cb.line === l.id));
+  return pool.length ? pool[(Math.random()*pool.length)|0] : null;
+}
+function spawnCall(force){
+  if(calls.length >= 12) return null;
+  const from = force ? lines[force.from] : freeLine();
+  if(!from || from.trunk || from.state !== 'idle' || from.plug) return null;
+  const roll = Math.random();
+  const easy = force || now() < graceUntil;   /* early on, nothing but plain local calls */
+  const inquiry = !easy && roll < 0.14, toll = !easy && !inquiry && roll < 0.32;
+  const c = {
+    from: from.id, want: null, wantMember: 0, askedBy: 'number', inquiry, toll,
+    town: toll ? TOWNS[(Math.random()*TOWNS.length)|0] : null,
+    tollNum: toll ? String(200 + ((Math.random()*799)|0)) : null,
+    phase: 'lamp', litAt: now(), patience: PAT0 + Math.random()*PAT1,
+    pair: null, answerEnd: 'front', lt: 0, heardIt: false, opAsked: false,
+    log: [], answeredAt: 0, busyKnown: false, resolved: false, wrong: false,
+    ringAcc: 0, willAnswer: Math.random() > 0.16, talked: 0,
+    talk: toll ? TOLL0 + Math.random()*TOLL1 : TALK0 + Math.random()*TALK1,
+    eaves: 0, fragT: 0, sinceHeard: 0, byeT: 0, badCode: false, isCallback: false,
+    text: inquiry ? INQUIRIES[(Math.random()*INQUIRIES.length)|0] : null
+  };
+  if(!inquiry && !toll){
+    let w, tries = 0;
+    do { w = lines[(Math.random()*NSUB)|0]; }
+    while((w === from || (easy && (w.party || lineBusy(w)))) && ++tries < 80);
+    c.want = w.id;
+    c.wantMember = w.party ? (Math.random()*w.members.length)|0 : 0;
+    c.askedBy = w.party ? 'name' : (easy ? 'number' : (Math.random() < 0.4 ? 'name' : 'number'));
+  }
+  if(force) Object.assign(c, force);
+  from.state = 'calling'; from.lampT = 0;
+  calls.push(c);
+  sfx.lamp();
+  return c;
+}
+const lineByNum = n => lines.findIndex(l => l.num === n);
+function spawnEncounter(step){
+  const free = id => id >= 0 && lines[id].state === 'idle' && !lines[id].plug && now() >= lines[id].busyUntil;
+
+  if(encounter === 'nothome'){
+    const her = lineByNum('21'), him = lineByNum('36');
+    if(step === 0){
+      if(!free(her)) return false;
+      spawnCall({ from: her, inquiry: true, promiseAsk: true,
+        text: career.notHome === 'told'
+          ? 'It is Mabel. I know what you did last time. If Tuck Renner rings, I am not at home.'
+          : 'Mabel Kranz. If Tuck Renner rings for me tonight, I am not at home. Do you understand me?' });
+      return true;
+    }
+    if(!free(him) || !free(her)) return false;
+    spawnCall({ from: him, want: her, askedBy:'number', willAnswer:true, talk: 22 + Math.random()*18,
+      refuse: { outcome:'completed', mark:true, memo:['notHome','lied'],
+                say:'You told him she was out. It goes on the sheet as a false report.',
+                note:'You told Tuck Renner that Mabel Kranz was not at home.' },
+      connected: { memo:['notHome','told'], say:'You put him through. She will know it was you.',
+                   note:'You put Tuck Renner through to Mabel Kranz after she asked you not to.' } });
+    return true;
+  }
+
+  if(encounter === 'lonely'){
+    const who = lineByNum('88');
+    if(!free(who)) return false;
+    spawnCall({ from: who, inquiry: true, lonely: true, lonelyT: 0, patience: 60,
+                text: 'Oh — no, dear, no number. I just wondered who was on tonight.' });
+    return true;
+  }
+
+  if(encounter === 'child'){
+    const kid = lineByNum('36'), dest = lineByNum(childErrand[1]);
+    if(!free(kid) || !free(dest)) return false;
+    spawnCall({ from: kid, want: dest, askedBy:'name', child:true, willAnswer:true,
+                patience: 40, talk: 16 + Math.random()*12 });
+    return true;
+  }
+
+  /* the Sheriff asks you to sit on a call. Doing as he says costs you one of your five. */
+  if(encounter === 'police'){
+    const law = lineByNum('14'), bank = lineByNum('47'), wire = lineByNum('17');
+    if(step === 0){
+      if(!free(law)) return false;
+      spawnCall({ from: law, inquiry: true, policeAsk: true,
+        text: career.police === 'defied'
+          ? 'Doyle. We had a talk about this once before. If the bank rings out tonight, it does not go through.'
+          : 'Doyle here. If the Bank of Verity rings out tonight, you do not put it through. Not to anybody.' });
+      return true;
+    }
+    if(!free(bank) || !free(wire)) return false;
+    spawnCall({ from: bank, want: wire, askedBy:'name', willAnswer:true, talk: 20 + Math.random()*14,
+      refuse: { outcome:'abandoned', mark:true, memo:['police','obeyed'],
+                say:'You held it, as Doyle asked. It goes down as a call you lost.',
+                note:'You held the Bank of Verity’s wire because Sheriff Doyle told you to.' },
+      connected: { memo:['police','defied'], say:'You put the wire through. Doyle will hear about it.',
+                   note:'You put the Bank of Verity through to Western Union against the Sheriff’s word.' } });
+    return true;
+  }
+
+  /* he rings the same farm three times a night, and he is entitled to */
+  if(encounter === 'debt'){
+    const man = lineByNum('65'), farm = lineByNum('36');
+    if(!free(man) || !free(farm)) return false;
+    const lines3 = [
+      'Claypool Brothers, collections. Kessler Farm, thirty-six, if you please.',
+      'Thirty-six again. I know they are in. Ring it properly this time.',
+      'Thirty-six. I will sit here all night, operator. It is nothing to me.'
+    ];
+    spawnCall({ from: man, want: farm, wantMember: 0, askedBy:'name', willAnswer:true,
+      patience: 34, talk: 14 + Math.random()*10, debtStep: step, debtText: lines3[step],
+      refuse: { outcome:'completed', mark:true, memo:['debt','blocked'],
+                say:'You told him the line was busy. It goes on the sheet as a false report.',
+                note:'You kept the collector off the Kessler farm for one more night.' },
+      connected: step === 2 ? { memo:['debt','through'],
+                note:'You put the collector through to the Kessler farm, three times in one night.' } : null });
+    return true;
+  }
+
+  /* he wants to know who his sister telephones. The key is under your thumb. */
+  if(encounter === 'eavesdrop'){
+    const him = lineByNum('71'), her = lineByNum('62'), friend = lineByNum('36');
+    if(step === 0){
+      if(!free(him)) return false;
+      spawnCall({ from: him, inquiry: true, eavesAsk: true,
+        text: career.eaves === 'told'
+          ? 'Ledbetter. You did right by me last time. Cleo Barrow will ring up tonight — same arrangement.'
+          : 'Sig Ledbetter. My sister Cleo will ring somebody tonight. Stay on the line and hear who, and what.' });
+      return true;
+    }
+    if(step === 1){
+      if(!free(her) || !free(friend)) return false;
+      spawnCall({ from: her, want: friend, wantMember: 1, askedBy:'name', eavesTarget: true,
+                  willAnswer:true, patience: 40, talk: 30 + Math.random()*14 });
+      return true;
+    }
+    if(!free(him)) return false;
+    spawnCall({ from: him, inquiry: true, eavesBack: true });
+    return true;
+  }
+
+  /* she rings her mother every night she can. One night the line will not answer. */
+  if(encounter === 'mother'){
+    const her = lineByNum('28'), mum = lineByNum('71');
+    if(!free(her) || !free(mum)) return false;
+    const nights = career.motherNights || 0;
+    const silent = nights >= 2;
+    spawnCall({ from: her, want: mum, wantMember: 1, askedBy:'name', motherCall: true,
+      willAnswer: !silent, patience: 45, talk: 26 + Math.random()*16,
+      noAnswerText: 'She always answers. She always answers, operator. Try it again.',
+      connected: { memo:['motherNights', nights + 1] } });
+    if(silent) career.motherNights = 0; else career.motherNights = nights + 1;
+    saveCareer();
+    return true;
+  }
+  return false;
+}
+function requestText(c){
+  if(c.eavesBack) return eavesHeard
+    ? 'Well? You stayed on, did you not. Let me have it.'
+    : 'Well? … You did not stay on the line at all, did you.';
+  if(c.debtText) return c.debtText;
+  if(c.motherCall) return 'It is Nadine. My mother — Orpha Vance, on seventy-one, please.';
+  if(c.child) return 'I want my mama. ' + childErrand[0] + '. Please, I want my mama.';
+  if(c.inquiry) return c.text;
+  if(c.toll) return (Math.random() < 0.5 ? 'I want ' : 'Get me ') + c.town + ' ' + digits(c.tollNum) + '.';
+  const w = lines[c.want];
+  if(w.party) return (Math.random() < 0.5 ? 'Get me ' : 'Ring ') + w.members[c.wantMember].name + ' on ' + words(w.num) + '.';
+  return c.askedBy === 'number'
+    ? (Math.random() < 0.5 ? words(w.num)+', please.' : 'Give me '+words(w.num)+'.')
+    : (Math.random() < 0.5 ? 'Get me '+w.name+', would you?' : 'Ring '+w.name+' for me.');
+}
+function claim(p, e, l){
+  const c = calls.find(cc => cc.from === l.id && cc.phase === 'lamp');
+  if(!c) return;
+  c.phase = 'answered'; c.pair = p.id; c.answerEnd = e; c.answeredAt = now();
+  p.call = c; p.answerEnd = e;
+  const t = now() - c.litAt;
+  stats.answered++; stats.answerSum += t; stats.best = Math.min(stats.best, t);
+  l.state = 'inuse';
+}
+/* the operator originates: picking up a slip off the call-back rail */
+function startCallback(p, e, l, cb){
+  callbacks.splice(callbacks.indexOf(cb), 1);
+  const c = {
+    from: l.id, want: null, wantMember: 0, askedBy: 'number', inquiry: false, toll: true,
+    town: cb.town, tollNum: cb.tollNum,
+    phase: 'callback', litAt: now(), patience: 999,
+    pair: p.id, answerEnd: e, lt: 0, heardIt: true, opAsked: true,
+    log: [{who:'op', text:'Verity calling. I have '+cb.town+' for you now.'}],
+    answeredAt: now(), busyKnown: false, resolved: false, wrong: false,
+    ringAcc: 0, willAnswer: true, talked: 0, talk: TOLL0 + Math.random()*TOLL1,
+    eaves: 0, fragT: 0, sinceHeard: 0, byeT: 0, badCode: false, isCallback: true, text: null
+  };
+  calls.push(c); p.call = c; p.answerEnd = e; l.state = 'inuse';
+  sfx.slip();
+}
+function fileCallback(c){
+  if(callbacks.length >= RAIL.slots) return false;
+  callbacks.push({ line: c.from, town: c.town, tollNum: c.tollNum, filedAt: now(), life: 72 });
+  sfx.slip();
+  say('Ticket filed — ring ' + lines[c.from].num + ' back when a trunk clears.');
+  return true;
+}
+function endCall(c, outcome){
+  c.phase = 'gone';
+  const f = lines[c.from];
+  if(f.state !== 'idle') f.state = 'idle';
+  if(c.pair != null && pairs[c.pair].call === c) pairs[c.pair].call = null;
+  if(outcome === 'completed'){
+    stats.completed++;
+    if(c.toll){ stats.toll++; if(c.isCallback) stats.kept++; }
+    sfx.good();
+  } else {
+    stats.abandoned++;
+    if(outcome === 'abandoned') sfx.lost();   /* dropped calls keep the error buzz instead */
+  }
+}
+function takedown(p){
+  const c = p.call;
+  const isTut = !!(tut && !tut.finished && tut.call === c);
+  for(const e of ['front','back']){
+    const l = endLine(p,e);
+    if(l != null){
+      startRetract(p, e, lines[l].x, lines[l].y);
+      lines[l].plug = null; setEnd(p,e,null);
+    }
+  }
+  p.pattern = []; p.ringDownAt = null;
+  if(!c) return;
+  if(canTakeDown(c)){ endCall(c, 'completed'); if(isTut) tut.tookDown = true; return; }
+  /* every trunk taken: the right answer is to promise a call back */
+  if(c.toll && c.heardIt && !c.isCallback && allTrunksBusy() && fileCallback(c)){
+    endCall(c, 'completed'); return;
+  }
+  /* some calls you may decline on purpose, and the board knows the difference */
+  if(c.refuse && c.heardIt && !c.resolved){
+    const r = c.refuse;
+    if(r.memo){ career[r.memo[0]] = r.memo[1]; saveCareer(); }
+    if(r.note) heardAdd(r.note);
+    if(r.mark) mark();
+    sfx.lost();
+    say(r.say, true);
+    endCall(c, r.outcome || 'completed');
+    return;
+  }
+  endCall(c, 'dropped'); mark(); sfx.err();
+  say('You pulled the cords on ' + lines[c.from].num + ' mid-call.', true);
+}
+
+/* ---------------------------------------------------------------- ringing */
+function pressRing(p){
+  p.ring = true; p.ringDownAt = shiftT; ringOn(); sfx.click();
+  const t = ringTarget(p, p.call);
+  if(t != null) lines[t].ringT = 0.3;
+}
+function releaseRing(p){
+  if(p.ringDownAt != null){
+    p.pattern.push(shiftT - p.ringDownAt >= LONG_HOLD ? 'L' : 'S');
+    if(p.pattern.length > 4) p.pattern.shift();
+    p.lastRelease = shiftT;
+  }
+  p.ring = false; p.ringSrc = null; p.ringDownAt = null;
+}
+/* a completed ring pattern on a party line: who picked up? */
+function judgePattern(p, c){
+  const t = ringTarget(p, c), tl = t != null ? lines[t] : null;
+  p.pattern = [];
+  if(!tl || !tl.party || c.resolved) return;
+  const want = tl.members[c.wantMember];
+  const got = tl.members.findIndex(m => codeEq(m.code, p.lastPattern));
+  if(got === c.wantMember && t === c.want){
+    c.phase = 'live'; c.resolved = true; c.talked = 0; sfx.lamp();
+  } else if(got >= 0){
+    c.phase = 'live'; c.resolved = true; c.talked = 0; c.wrong = true;
+    mark(); sfx.err();
+    say('You rang ' + tl.members[got].name + '. That is not who asked for.', true);
+  } else {
+    c.badCode = true;
+    say('Nobody picked up on ' + tl.num + '. Mind the code.');
+  }
+}
+
+/* ---------------------------------------------------------------- walk-through */
+function tutFlags(){
+  Object.assign(tut, { tested:false, plugged:false, wasLive:false, wasHung:false, tookDown:false });
+}
+function endTutorial(skipped){
+  tut = skipped ? null : Object.assign(tut, { finished:true, doneAt:0 });
+  tutorialOn = false; saveTut();
+  playFrom = shiftT; graceUntil = shiftT + (skipped ? GRACE*0.6 : GRACE);
+  spawnT = Math.min(spawnT, 3.5);
+}
+function tutUpdate(dt){
+  if(!tut) return;
+  if(tut.finished){ tut.doneAt += dt; if(tut.doneAt > 8) tut = null; return; }
+  if(!tut.call){
+    /* 21 rings up 11: two private lines, a plain local call, and all the patience in the world */
+    tutFlags();
+    tut.call = spawnCall({ from:3, want:0, wantMember:0, askedBy:'number',
+                           patience:99999, willAnswer:true, talk:14 });
+    return;
+  }
+  const c = tut.call, p = c.pair != null ? pairs[c.pair] : null;
+  /* high-water marks: a step once satisfied stays satisfied, so a prompt
+     take-down cannot rewind the walk-through past a step it already passed */
+  if(c.phase === 'live') tut.wasLive = true;
+  if(c.phase === 'hungup') tut.wasHung = true;
+  if(p && endLine(p,'back') === c.want) tut.plugged = true;
+
+  let guard = 0;
+  while(tut.i < TUT.length && TUT[tut.i].done(c, p) && guard++ < 12){
+    tut.i++;
+    if(tut.i < TUT.length) sfx.slip();
+  }
+  if(tut.i >= TUT.length){ endTutorial(false); return; }
+  if(c.phase === 'gone' && !tut.tookDown){   /* they dropped it — set it up again, no harm done */
+    tut.call = null; tut.i = 0; tutFlags();
+    say('Never mind. We will take that one from the top.');
+  }
+}
+
+/* ---------------------------------------------------------------- update */
+function update(dt){
+  if(mode !== 'play' || paused) return;
+  shiftT += dt;
+  retracts.forEach(r => r.t += dt);
+  if(retracts.some(r => r.t >= r.dur)){
+    sfx.seat();
+    retracts = retracts.filter(r => r.t < r.dur);
+  }
+  floats.forEach(f => f.t += dt); floats = floats.filter(f => f.t < 4.2);
+  msgs.forEach(m => m.t += dt);   msgs   = msgs.filter(m => m.t < 5.0);
+  lines.forEach(l => { l.lampT += dt; if(l.ringT > 0) l.ringT -= dt; l.urgent = false; });
+
+  tutUpdate(dt);
+  const held = tutHold();
+
+  if(!stats.failed){
+    if(!stats.warned && stats.abandoned === ALLOW - 1){
+      stats.warned = true;
+      say('One more lost call and Miss Pryor will have you off the position.', true);
+    }
+    if(stats.abandoned >= ALLOW){
+      endRun(false); return;
+    }
+  }
+  if(shiftT >= SHIFT_LEN && calls.length === 0 && callbacks.length === 0){
+    mode = 'report'; ringOff(); sfx.bell(); recordShift(); return;
+  }
+
+  if(shiftT < SHIFT_LEN && !held){
+    spawnT -= dt;
+    if(spawnT <= 0){
+      spawnCall();
+      const span = Math.max(40, SHIFT_LEN - playFrom);
+      const prog = Math.min(1, Math.max(0, (shiftT - playFrom) / span));
+      spawnT = (SPAWN0 + (SPAWN1 - SPAWN0)*prog) / pace() * (0.6 + Math.random()*0.8);
+    }
+    if(encPlan.length && shiftT >= encPlan[0].at){
+      if(spawnEncounter(encPlan[0].step)) encPlan.shift();
+    }
+    if(longAt !== null && shiftT >= longAt){
+      const src = freeLine();
+      if(src){ longAt = null; spawnCall({ from: src.id, talk: LONG0 + Math.random()*LONG1 }); }
+    }
+    bgT -= dt;
+    if(bgT <= 0){
+      bgT = 2.5 + Math.random()*3.5;
+      if(lines.filter(l => !l.trunk && now() < l.busyUntil).length < 5){
+        const l = freeLine();
+        /* never make the line the walk-through is about to ring test as busy */
+        if(l && !(tut && tut.call && l.id === tut.call.want)) l.busyUntil = now() + 14 + Math.random()*38;
+      }
+    }
+    /* the other positions are working the toll trunks too */
+    trunkT -= dt;
+    if(trunkT <= 0){
+      trunkT = 7 + Math.random()*9;
+      const free = trunks.filter(t => !lineBusy(t));
+      if(free.length > 1 && Math.random() < 0.6)
+        free[(Math.random()*free.length)|0].busyUntil = now() + 18 + Math.random()*30;
+    }
+  }
+
+  /* the call-back rail */
+  for(const cb of callbacks.slice()){
+    if(now() - cb.filedAt > cb.life){
+      callbacks.splice(callbacks.indexOf(cb), 1);
+      mark(); stats.abandoned++; stats.broken++; sfx.err();
+      say('You never rang ' + lines[cb.line].num + ' back about ' + cb.town + '.', true);
+    }
+  }
+
+  /* pattern timeout — a gap this long means the code is finished */
+  for(const p of pairs){
+    if(p.pattern.length && !p.ring && shiftT - p.lastRelease > PATTERN_GAP){
+      p.lastPattern = p.pattern.slice();
+      if(p.call) judgePattern(p, p.call); else p.pattern = [];
+    }
+  }
+
+  for(const c of calls){
+    const p = c.pair != null ? pairs[c.pair] : null;
+    const listening = !!(p && p.listen && p.call === c);
+    const left = patienceLeft(c);
+    c.urgent = D.warn && left !== null && left <= GIVEUP_WARN;
+    if(c.urgent){
+      lines[c.from].urgent = true;
+      if(!c.warnTick){ c.warnTick = true; sfx.about(); }
+    } else c.warnTick = false;
+
+    if(c.phase === 'lamp'){
+      if(now() - c.litAt > c.patience){
+        endCall(c, 'abandoned');
+        say(lines[c.from].num + ' gave up waiting.', true);
+      }
+      continue;
+    }
+
+    /* ringing a subscriber back about their toll call */
+    if(c.phase === 'callback'){
+      if(p && p.ring && ringTarget(p,c) != null){
+        c.ringAcc += dt;
+        lines[c.from].ringT = 0.25;
+        if(c.ringAcc > 1.8){
+          c.phase = 'answered'; c.answeredAt = now(); c.ringAcc = 0; p.pattern = [];
+          c.log.push({who:'them', text:'About time. Put me through.'});
+          sfx.lamp();
+        }
+      }
+      continue;
+    }
+
+    if(c.phase === 'answered'){
+      if(listening){
+        c.lt += dt;
+        if(!c.opAsked && c.lt > 0.45){ c.opAsked = true; c.log.push({who:'op', text:'Number, please.'}); }
+        if(!c.heardIt && c.lt > 2.0){
+          c.heardIt = true;
+          c.log.push({ who:'them', text: requestText(c) });
+        }
+        if(c.inquiry && !c.lonely && c.heardIt && c.lt > 5.2 && !c.resolved){
+          c.resolved = true;
+          if(c.eavesBack){
+            career.eaves = eavesHeard ? 'told' : 'nothing'; saveCareer();
+            heardAdd(eavesHeard
+              ? 'You told Sig Ledbetter what his sister said on the telephone.'
+              : 'Sig Ledbetter asked what his sister said, and you had nothing for him.');
+            c.log.push({who:'them', text: eavesHeard
+              ? 'Good girl. I will not forget it.'
+              : 'No. Well. I had you figured differently.'});
+          } else c.log.push({who:'them', text:'Much obliged. Goodnight.'});
+        }
+      }
+      if(c.heardIt) c.sinceHeard += dt;
+      /* she does not want a number. She wants somebody on the other end of it. */
+      if(c.lonely && c.heardIt && !c.resolved){
+        c.lonelyT += dt;
+        if(c.lonelyT > 13 && !c.l1){ c.l1 = true; c.log.push({who:'them', text:'It gets awful quiet after five.'}); }
+        if(c.lonelyT > 27 && !c.l2){ c.l2 = true; c.log.push({who:'them', text:'Bram would have been eighty in March.'}); }
+        if(c.lonelyT > 42){
+          c.resolved = true;
+          c.log.push({who:'them', text:'Well. I have kept you. Goodnight, dear.'});
+        }
+      }
+
+      const dest = p ? ringTarget(p, c) : null;
+      const dl = dest != null ? lines[dest] : null;
+      if(p && p.ring && dl && !c.inquiry && !c.resolved){
+        c.ringAcc += dt;
+        dl.ringT = 0.25;
+        if(c.toll){
+          /* raising the operator at the far exchange takes a good long pull */
+          if(!dl.trunk){
+            if(c.ringAcc > 1.8 && !c.wrong){
+              c.wrong = true; mark(); sfx.err();
+              say('That is a toll call — it wants a trunk, not a local line.', true);
+            }
+          } else if(c.ringAcc > 3.2){
+            c.phase = 'live'; c.resolved = true; c.talked = 0; p.pattern = [];
+            c.log.push({who:'op', text: c.town + ' operator — ' + digits(c.tollNum) + ', please.'});
+            sfx.trunk();
+          }
+        } else if(!dl.party){
+          if(c.willAnswer && c.ringAcc > 1.8){
+            c.phase = 'live'; c.resolved = true; c.talked = 0; p.pattern = []; sfx.lamp();
+            if(c.connected && dest === c.want){
+              const k = c.connected;
+              if(k.memo){ career[k.memo[0]] = k.memo[1]; saveCareer(); }
+              if(k.note) heardAdd(k.note);
+              if(k.say) say(k.say, true);
+            }
+            if(c.child && dest === c.want) heardAdd('A child on 36 found their mother because you knew where she was.');
+            if(dest !== c.want){
+              c.wrong = true; mark(); sfx.err();
+              say(c.child ? 'That is not where the child’s mother is.'
+                          : 'Wrong number — ' + lines[c.from].num + ' asked for ' + wantLabel(c) + '.', true);
+            }
+          }
+        }
+        /* party lines are settled by judgePattern when the code finishes */
+      }
+      if(!c.toll && !c.willAnswer && c.ringAcc > 8 && !c.resolved){
+        c.resolved = true;
+        c.log.push({who:'them', text: c.noAnswerText || "No use. They're out. Thank you, operator."});
+        if(c.motherCall) heardAdd('Orpha Vance did not answer her telephone tonight.');
+        say(c.motherCall ? 'Seventy-one does not answer.' : 'No answer on that line.', c.motherCall);
+      }
+
+      if(c.resolved){
+        c.byeT += dt;
+        if(c.byeT > 3){ c.phase = 'hungup'; sfx.lamp(); }
+      } else {
+        const waited = now() - c.answeredAt;
+        if(!c.heardIt && waited > 24){
+          endCall(c,'abandoned');
+          say(lines[c.from].num + ' hung up — you never took the number.', true);
+        } else if(c.heardIt && c.sinceHeard > 46){
+          endCall(c,'abandoned');
+          say(lines[c.from].num + ' got tired of holding.', true);
+        }
+      }
+      continue;
+    }
+
+    if(c.phase === 'live'){
+      c.talked += dt;
+      const dl = p ? lines[ringTarget(p,c)] : null;
+      /* on a party line the neighbours can lift their receivers */
+      if(dl && dl.party && !dl.snoop && Math.random() < dt*0.035){ dl.snoop = true; sfx.click(); }
+      if(listening){
+        c.eaves += dt; c.fragT += dt;
+        if(c.fragT > 2.6){
+          c.fragT = 0;
+          if(c.eavesTarget && c.eaves >= 6) eavesHeard = true;
+          const pool = (dl && dl.snoop && Math.random() < 0.5) ? SNOOPS : FRAGMENTS;
+          const f = pool[(Math.random()*pool.length)|0];
+          if(!heard.includes(f)) heard.push(f);
+          floats.push({ x: p.x, y: SHELF_Y + 46, text: f, t: 0 });
+        }
+        if(D.pryor && !(tut && !tut.finished) && Math.random() < dt*0.05){
+          p.listen = false; mark(); sfx.err();
+          say('Miss Pryor is at your shoulder. Release that key.', true);
+        }
+      }
+      if(c.talked > c.talk){
+        c.phase = 'hungup'; sfx.lamp();
+        if(dl) dl.snoop = false;
+      }
+    }
+  }
+  calls = calls.filter(c => c.phase !== 'gone');
+
+  /* the shelf fights back */
+  if(drag && !drag.active && shiftT >= drag.snagUntil){
+    drag.active = true;
+    const p = pairs[drag.pair], l = endLine(p, drag.end);
+    if(l != null){ lines[l].plug = null; setEnd(p, drag.end, null); sfx.snap(); }
+  }
+  if(drag && drag.active){
+    drag.x = mouse.x; drag.y = mouse.y - (drag.touch ? TOUCH_LIFT : 0);
+    const j = jackAt(drag.x, drag.y);
+    if(j !== drag.hoverJack){ drag.hoverJack = j; drag.hoverT = 0; drag.test = null; }
+    else if(j){
+      drag.hoverT += dt;
+      if(drag.hoverT > 0.35 && !drag.test){
+        const busy = lineBusy(j);
+        drag.test = busy ? 'busy' : 'free';
+        busy ? sfx.dbl() : sfx.click();
+        if(tut && !tut.finished && tut.call && j.id === tut.call.want) tut.tested = true;
+        const p = pairs[drag.pair], c = p.call;
+        if(c && busy && j.id === c.want && !c.busyKnown && c.phase === 'answered'){
+          c.busyKnown = true; c.resolved = true;
+          if(p.listen) c.log.push({who:'op', text:"That line's busy. Shall I ring you back?"});
+        }
+      }
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- input */
+function pos(e){
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX-r.left)*(W/r.width), y: (e.clientY-r.top)*(H/r.height) };
+}
+function keyRects(p){
+  return { listen: {x:p.x-56, y:KEYY, w:46, h:KEYH}, ring: {x:p.x+10, y:KEYY, w:46, h:KEYH} };
+}
+const inRect = (x,y,r) => x>=r.x && x<=r.x+r.w && y>=r.y && y<=r.y+r.h;
+
+/* stepping away from the board puts every key and cord down first */
+function setPaused(on){
+  paused = on;
+  if(!on) return;
+  for(const p of pairs){ p.ring = false; p.ringSrc = null; p.ringDownAt = null; }
+  for(const k of Object.keys(ringOwners)) delete ringOwners[k];
+  ringOff();
+  if(drag){
+    if(drag.active) startRetract(pairs[drag.pair], drag.end, drag.x, drag.y);
+    drag = null; dragOwner = null;
+  }
+}
+function settle(p, e){
+  startRetract(p, e, mouse.x, mouse.y);
+  setEnd(p, e, null);
+  if(p.call && endLine(p, p.answerEnd) == null) takedown(p);
+}
+
+/* one pointer path for both the mouse and any number of fingers */
+let dragOwner = null, volOwner = null;
+const ringOwners = {};
+
+function padRect(r, pd){ return { x:r.x-pd, y:r.y-pd, w:r.w+pd*2, h:r.h+pd*2 }; }
+function plugAt(x, y){
+  let best = null, bd = plugHitR()**2;
+  for(const p of pairs){
+    if(p.broken) continue;
+    for(const e of ['front','back']){
+      const pp = plugPos(p, e), d = (x-pp.x)**2 + (y-pp.y)**2;
+      if(d < bd){ bd = d; best = { p, e }; }    /* nearest, not first — fingers are blunt */
+    }
+  }
+  return best;
+}
+function hitTest(m){
+  const vh = volHit(m);
+  if(vh) return { t:'vol', which:vh };
+  if(help) return { t:'closehelp' };
+  if(paused){
+    if(inRect(m.x,m.y,MENU.resume)) return { t:'resume' };
+    if(inRect(m.x,m.y,MENU.help))   return { t:'help' };
+    if(inRect(m.x,m.y,MENU.quit))   return { t:'quit' };
+    return null;
+  }
+  if(mode === 'name'){
+    return inRect(m.x,m.y,SBACK) ? { t:'savename' } : null;
+  }
+  if(mode === 'scores'){
+    for(let i=0;i<SFILT.length;i++) if(inRect(m.x,m.y,SFILT[i])) return { t:'filter', i:i-1 };
+    return { t:'closescores' };
+  }
+  if(mode === 'title'){
+    if(inRect(m.x,m.y,TBTN.tut))    return { t:'tut' };
+    if(inRect(m.x,m.y,TBTN.scores)) return { t:'scores' };
+    if(day > 1 && inRect(m.x,m.y,TBTN.reset)) return { t:'resetdays' };
+    const d = diffHit(m);
+    return d >= 0 ? { t:'diff', i:d } : { t:'begin' };
+  }
+  if(mode === 'report') return { t:'nextday' };
+  if(inRect(m.x,m.y,BTN.help))     return { t:'help' };
+  if(tut && !tut.finished && m.y > 734 && m.x > W-260) return { t:'skip' };
+  const pd = keyPad();
+  for(const p of pairs){
+    if(p.broken) continue;
+    const k = keyRects(p);
+    if(inRect(m.x,m.y,padRect(k.listen,pd))) return { t:'listen', p };
+    if(inRect(m.x,m.y,padRect(k.ring,pd)))   return { t:'ring', p };
+  }
+  const pl = plugAt(m.x, m.y);
+  return pl ? { t:'plug', p:pl.p, end:pl.e } : null;
+}
+function actDown(m, id){
+  ac();
+  const h = hitTest(m);
+  if(!h) return;
+  switch(h.t){
+    case 'vol':
+      if(h.which === 'mute'){ muted = !muted; applyVol(); saveAudio(); if(!muted) sfx.click(); }
+      else { volDrag = true; volOwner = id; setVolFrom(m.x); sfx.click(); }
+      return;
+    case 'resetdays': resetDays(); sfx.click(); return;
+    case 'scores': mode = 'scores'; sfx.click(); return;
+    case 'filter': scoreFilter = h.i; sfx.click(); return;
+    case 'resume': setPaused(false); sfx.click(); return;
+    case 'quit': setPaused(false); endRun(true); return;
+    case 'closescores':
+      if(pending){ pending = null; hideNameBox(); begin(); }
+      else mode = 'title';
+      sfx.click(); return;
+    case 'savename': commitName(nameBox.value); hideNameBox(); mode = 'scores'; sfx.good(); return;
+    case 'tut':  tutorialOn = !tutorialOn; saveTut(); sfx.click(); return;
+    case 'diff': setDiff(h.i); sfx.click(); return;
+    case 'begin': begin(); return;
+    case 'nextday':
+      if(stats.failed && pending){ mode = pending.qualifies ? 'name' : 'scores'; sfx.click(); return; }
+      if(!stats.failed) nextDay();
+      begin(); return;
+    case 'closehelp': help = false; return;
+    case 'help': help = true; sfx.click(); return;
+    case 'skip': endTutorial(true); sfx.click(); return;
+    case 'listen': h.p.listen = !h.p.listen; sfx.click(); return;
+    case 'ring':
+      if(ringOwners[id] != null) return;
+      pressRing(h.p); h.p.ringSrc = 'pointer'; ringOwners[id] = h.p.id;
+      return;
+    case 'plug': {
+      if(dragOwner !== null) return;             /* one cord at a time */
+      const p = h.p, en = h.end;
+      retracts = retracts.filter(r => !(r.pair === p.id && r.end === en));
+      const n = crossCountFor(p, en), pp = plugPos(p, en);
+      mouse = m; dragOwner = id;
+      drag = { pair:p.id, end:en, active:false, snagUntil: shiftT + Math.min(0.8, n*0.12),
+               x:pp.x, y:pp.y, hoverJack:null, hoverT:0, test:null, snag:n, touch: id !== 'mouse' };
+      if(n > 0) sfx.snag();
+      return;
+    }
+  }
+}
+function actMove(m, id){
+  if(volDrag && volOwner === id){ setVolFrom(m.x); return; }
+  if(dragOwner === id) mouse = m;
+}
+function actUp(id){
+  if(volDrag && volOwner === id){ volDrag = false; volOwner = null; return; }
+  if(ringOwners[id] != null){
+    releaseRing(pairs[ringOwners[id]]); delete ringOwners[id];
+    if(!pairs.some(p => p.ring)) ringOff();
+    return;
+  }
+  if(dragOwner !== id) return;
+  dragOwner = null;
+  const d = drag; drag = null;
+  if(!d || !d.active) return;
+  const p = pairs[d.pair];
+  const j = jackAt(mouse.x, mouse.y - (d.touch ? TOUCH_LIFT : 0));
+  if(j && !j.plug){
+    if(lineBusy(j) && j.state !== 'calling'){
+      mark(); sfx.err();
+      say(j.trunk ? 'Trunk ' + j.num + ' is working a call for another position.'
+                  : 'You cut into a conversation on ' + j.num + '. Both parties heard you.', true);
+      settle(p, d.end);
+      return;
+    }
+    j.plug = { pair:p.id, end:d.end };
+    setEnd(p, d.end, j.id);
+    sfx.thunk(j.trunk);
+    if(j.state === 'calling') claim(p, d.end, j);
+    else {
+      const cb = callbacks.find(x => x.line === j.id);
+      if(cb && !p.call) startCallback(p, d.end, j, cb);
+    }
+    return;
+  }
+  settle(p, d.end);
+}
+
+cv.addEventListener('mousedown', e=>{ mouse = pos(e); actDown(mouse, 'mouse'); });
+window.addEventListener('mousemove', e=>{ const m = pos(e); mouse = m; actMove(m, 'mouse'); });
+window.addEventListener('mouseup', ()=>{ actUp('mouse'); });
+
+function tpos(t){
+  const r = cv.getBoundingClientRect();
+  return { x: (t.clientX-r.left)*(W/r.width), y: (t.clientY-r.top)*(H/r.height) };
+}
+cv.addEventListener('touchstart', e=>{
+  touchMode = true; e.preventDefault();
+  for(const t of e.changedTouches) actDown(tpos(t), t.identifier);
+}, {passive:false});
+cv.addEventListener('touchmove', e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches) actMove(tpos(t), t.identifier);
+}, {passive:false});
+function touchesEnded(e){
+  e.preventDefault();
+  for(const t of e.changedTouches) actUp(t.identifier);
+}
+cv.addEventListener('touchend', touchesEnded, {passive:false});
+cv.addEventListener('touchcancel', touchesEnded, {passive:false});
+
+window.addEventListener('keydown', e=>{
+  if(e.repeat) return;
+  ac();
+  const k = e.key.toLowerCase();
+  if(k === 'h'){ help = !help; return; }
+  if(k === 'm'){ muted = !muted; applyVol(); saveAudio(); if(!muted) sfx.click(); return; }
+  if(k === '[' || k === '-' || k === '_'){ nudgeVol(-0.1); return; }
+  if(k === ']' || k === '=' || k === '+'){ nudgeVol(0.1); return; }
+  if(k === 't' && mode !== 'play'){ tutorialOn = !tutorialOn; saveTut(); sfx.click(); return; }
+  if(mode === 'title' && '123'.indexOf(k) >= 0){ setDiff(+k - 1); sfx.click(); return; }
+  if(mode === 'name') return;          /* the text box has the keyboard */
+  if(k === 'escape' && mode === 'play'){ setPaused(!paused); sfx.click(); return; }
+  if(paused){
+    if(k === 'q'){ setPaused(false); endRun(true); }
+    return;
+  }
+  if(mode === 'scores'){
+    if(k === 'escape' || k === 'enter' || k === ' '){
+      if(pending){ pending = null; hideNameBox(); begin(); return; }
+      mode = 'title';
+    }
+    else { const f = '0123'.indexOf(k); if(f >= 0) scoreFilter = f - 1; }
+    return;
+  }
+  if(mode === 'title'){ begin(); return; }
+  if(mode === 'report'){
+    if(stats.failed && pending){ mode = pending.qualifies ? 'name' : 'scores'; return; }
+    if(!stats.failed) nextDay();
+    begin(); return;
+  }
+  if(k === 's' && tut && !tut.finished){ endTutorial(true); sfx.click(); return; }
+  const li = '12345678'.indexOf(k);
+  if(li >= 0){ if(!pairs[li].broken){ pairs[li].listen = !pairs[li].listen; sfx.click(); } return; }
+  const ri = 'qwertyui'.indexOf(k);
+  if(ri >= 0 && !pairs[ri].ring && !pairs[ri].broken){ pressRing(pairs[ri]); pairs[ri].ringSrc = 'key'; }
+});
+window.addEventListener('keyup', e=>{
+  const ri = 'qwertyui'.indexOf(e.key.toLowerCase());
+  if(ri >= 0 && pairs[ri].ringSrc === 'key'){
+    releaseRing(pairs[ri]);
+    if(!pairs.some(p => p.ring)) ringOff();
+  }
+});
+
+/* ---------------------------------------------------------------- render */
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+function lamp(x,y,r,on,warm){
+  if(on){
+    const g = ctx.createRadialGradient(x,y,0,x,y,r*5);
+    g.addColorStop(0, warm ? 'rgba(255,190,90,0.5)' : 'rgba(255,120,80,0.5)');
+    g.addColorStop(1, 'rgba(255,160,60,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x,y,r*5,0,7); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(x,y,r,0,7);
+  ctx.fillStyle = on ? (warm ? '#ffcb72' : '#ff8a4d') : '#2e2318';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1.2; ctx.stroke();
+}
+function wrap(text, maxW){
+  const out = []; let cur = '';
+  for(const w of text.split(' ')){
+    const t = cur ? cur+' '+w : w;
+    if(ctx.measureText(t).width > maxW && cur){ out.push(cur); cur = w; } else cur = t;
+  }
+  if(cur) out.push(cur);
+  return out;
+}
+function codeWidth(code){ return code.reduce((a,e)=> a + (e==='L'?15:5) + 4, 0) - 4; }
+function drawCode(x, y, code, col){
+  ctx.fillStyle = col;
+  let cx = x;
+  for(const e of code){ const w = e === 'L' ? 15 : 5; ctx.fillRect(cx, y, w, 4); cx += w + 4; }
+}
+function drawCord(a, b, tint, hot){
+  const c = cordCtrl(a,b);
+  ctx.lineCap = 'round';
+  for(const [col,w] of [['rgba(0,0,0,0.55)',8.5],[tint,5.5],[hot||'rgba(255,200,140,0.10)',1.6]]){
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.quadraticCurveTo(c.x,c.y,b.x,b.y);
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke();
+  }
+}
+function drawPlug(x,y,seated){
+  ctx.beginPath(); ctx.arc(x,y,seated?8:10,0,7);
+  const g = ctx.createLinearGradient(x-8,y-8,x+8,y+8);
+  g.addColorStop(0,'#8e7a52'); g.addColorStop(0.5,'#3a3026'); g.addColorStop(1,'#6b5a3c');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x-2.5,y-3,2.6,0,7); ctx.fillStyle = 'rgba(255,230,180,0.5)'; ctx.fill();
+}
+function drawJackHole(x, y, r, ring){
+  ctx.beginPath(); ctx.arc(x,y,r,0,7);
+  ctx.fillStyle = '#0a0704'; ctx.fill();
+  ctx.strokeStyle = ring || '#7d6533'; ctx.lineWidth = 2.4; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y-1.5,r,Math.PI*1.15,Math.PI*1.85);
+  ctx.strokeStyle = 'rgba(255,220,150,0.35)'; ctx.lineWidth = 1.4; ctx.stroke();
+}
+function drawKey(r, on, label){
+  rr(r.x, r.y, r.w, r.h, 3);
+  const g = ctx.createLinearGradient(0,r.y,0,r.y+r.h);
+  if(on){ g.addColorStop(0,'#6d5426'); g.addColorStop(1,'#3a2c12'); }
+  else   { g.addColorStop(0,'#241d14'); g.addColorStop(1,'#151009'); }
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = on ? '#c9a45a' : '#3c3021'; ctx.lineWidth = on ? 1.8 : 1.2; ctx.stroke();
+  rr(r.x+11, on ? r.y+r.h-19 : r.y+8, r.w-22, 9, 2);
+  ctx.fillStyle = on ? '#e0b96a' : '#5a4a30'; ctx.fill();
+  ctx.textAlign = 'center'; ctx.font = 'bold 9px Georgia, serif';
+  ctx.fillStyle = on ? '#f0d69a' : 'rgba(170,150,110,0.45)';
+  ctx.fillText(label, r.x+r.w/2, r.y+r.h-5);
+}
+
+/* with help on, the board points at whatever a waiting caller asked for */
+function wantedSet(){
+  const s = new Set();
+  if(!D.targetGlow) return s;
+  for(const p of pairs){
+    const c = p.call;
+    /* a child who gave no number is nothing the board could have looked up */
+    if(!c || !c.heardIt || c.resolved || c.inquiry || c.child || c.phase === 'callback') continue;
+    if(c.toll){ for(const t of trunks) if(!lineBusy(t)) s.add(t.id); }
+    else if(c.want != null && endLine(p, otherEnd(c.answerEnd)) !== c.want) s.add(c.want);
+  }
+  return s;
+}
+function drawWantGlow(x, y, r){
+  const pulse = 0.5 + 0.5*Math.sin(shiftT*3.4);
+  const g = ctx.createRadialGradient(x,y,r*0.4,x,y,r+9);
+  g.addColorStop(0, 'rgba(150,225,165,0)');
+  g.addColorStop(1, 'rgba(150,225,165,' + (0.10 + 0.10*pulse) + ')');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x,y,r+9,0,7); ctx.fill();
+  ctx.strokeStyle = 'rgba(158,225,170,' + (0.40 + 0.40*pulse) + ')';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(x, y, r + 5 + pulse*2.5, 0, 7); ctx.stroke();
+}
+function tutHighlights(){
+  if(!tut || tut.finished || !tut.call) return null;
+  const c = tut.call, p = c.pair != null ? pairs[c.pair] : (pairs.find(q => !q.broken) || pairs[0]);
+  const from = lines[c.from], want = lines[c.want];
+  switch(tut.i){
+    case 0: return { rings:[{x:from.x, y:from.y, r:16}, {x:p.x+FRONTDX, y:SPRINGY, r:15}],
+                     guide:[springPos(p,'front'), {x:from.x, y:from.y}] };
+    case 1: return { keys:[keyRects(p).listen] };
+    case 2: return { rings:[{x:want.x, y:want.y, r:16}, {x:p.x+BACKDX, y:SPRINGY, r:15}],
+                     guide:[springPos(p,'back'), {x:want.x, y:want.y}] };
+    case 3: return { rings:[{x:want.x, y:want.y, r:16}] };
+    case 4: return { keys:[keyRects(p).ring] };
+    case 5: return { keys:[keyRects(p).listen] };
+    case 6: return { rings:[{x:p.x+FRONTDX, y:SUPY, r:10}, {x:p.x+BACKDX, y:SUPY, r:10}] };
+    case 7: return { rings:[{x:from.x, y:from.y, r:16}, {x:want.x, y:want.y, r:16},
+                            {x:p.x+FRONTDX, y:SPRINGY, r:15}, {x:p.x+BACKDX, y:SPRINGY, r:15}] };
+  }
+  return null;
+}
+function renderTutHi(){
+  const h = tutHighlights();
+  if(!h) return;
+  const pulse = 0.5 + 0.5*Math.sin(shiftT*4.5);
+  ctx.save();
+  if(h.guide){
+    const [a,b] = h.guide, cc = cordCtrl(a,b);
+    ctx.setLineDash([7,8]); ctx.lineDashOffset = -shiftT*30;
+    ctx.strokeStyle = 'rgba(255,205,110,' + (0.16 + 0.16*pulse) + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.quadraticCurveTo(cc.x,cc.y,b.x,b.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = 'rgba(255,205,110,' + (0.45 + 0.45*pulse) + ')'; ctx.lineWidth = 2.4;
+  for(const r of (h.rings||[])){ ctx.beginPath(); ctx.arc(r.x, r.y, r.r + pulse*3.5, 0, 7); ctx.stroke(); }
+  for(const k of (h.keys||[])){
+    const g = 3 + pulse*2.5;
+    rr(k.x-g, k.y-g, k.w+g*2, k.h+g*2, 5); ctx.stroke();
+  }
+  ctx.restore();
+}
+function renderCoach(){
+  if(!tut) return;
+  /* tut.call is null for the frame between a dropped call and its replacement */
+  const txt = tut.finished ? TUT_END
+            : tut.call ? TUT[tut.i].text(tut.call)
+            : 'One moment — we will take that one from the top.';
+  rr(22, 734, W-44, 56, 4);
+  ctx.fillStyle = 'rgba(228,215,184,0.96)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,205,110,0.55)'; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#8a5a12'; ctx.font = 'bold 10px Georgia, serif';
+  ctx.fillText(tut.finished ? 'THE WALK-THROUGH IS DONE' : ('STEP ' + (tut.i+1) + ' OF ' + TUT.length), 38, 751);
+  ctx.fillStyle = '#3a2c18'; ctx.font = '14px Georgia, serif';
+  const rows = wrap(txt, W - 300).slice(0,2);
+  let y = rows.length > 1 ? 767 : 772;
+  for(const r of rows){ ctx.fillText(r, 38, y); y += 17; }
+  if(!tut.finished){
+    ctx.textAlign = 'right'; ctx.fillStyle = '#7a6a4c'; ctx.font = 'italic 11px Georgia, serif';
+    ctx.fillText('press S to skip the walk-through', W-38, 774);
+  }
+}
+
+/* tappable equivalents of the keyboard-only controls, for touch */
+const BTN = {
+  help: { x:1096, y:6, w:26, h:24 }
+};
+const TBTN = {
+  tut:    { x:W/2-230, y:620, w:460, h:26 },
+  scores: { x:W/2-330, y:650, w:300, h:24 },
+  reset:  { x:W/2+30,  y:650, w:300, h:24 }
+};
+/* the record sheet */
+const SFILT = [0,1,2,3].map(i => ({ x: W/2 - 350 + i*176, y: 116, w: 168, h: 30 }));
+const SBACK = { x: W/2-110, y: H-64, w: 220, h: 32 };
+/* the pause menu */
+const MENU = {
+  resume: { x:W/2-180, y:322, w:360, h:46 },
+  help:   { x:W/2-180, y:378, w:360, h:46 },
+  quit:   { x:W/2-180, y:448, w:360, h:46 }
+};
+function drawMiniBtn(r, label, size){
+  rr(r.x, r.y, r.w, r.h, 3);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(190,165,110,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.font = 'bold ' + (size||14) + 'px Georgia, serif';
+  ctx.fillStyle = 'rgba(205,185,140,0.85)';
+  ctx.fillText(label, r.x + r.w/2, r.y + r.h/2 + (size||14)*0.36);
+}
+const DIFFY = [464, 508, 552];
+function diffHit(m){
+  if(mode !== 'title') return -1;
+  for(let i=0;i<DIFFS.length;i++)
+    if(Math.abs(m.x - W/2) < 372 && m.y > DIFFY[i]-19 && m.y < DIFFY[i]+21) return i;
+  return -1;
+}
+const VOLW = { mx: W-128, tx: W-92, ty: 17, tw: 68 };
+function volHit(m){
+  if(m.y < 3 || m.y > 33) return null;
+  if(m.x >= VOLW.mx-7 && m.x <= VOLW.mx+21) return 'mute';
+  if(m.x >= VOLW.tx-8 && m.x <= VOLW.tx+VOLW.tw+8) return 'slider';
+  return null;
+}
+function setVolFrom(x){
+  vol = Math.min(1, Math.max(0, (x - VOLW.tx)/VOLW.tw));
+  if(vol > 0) muted = false;
+  applyVol(); saveAudio();
+}
+function nudgeVol(d){
+  vol = Math.min(1, Math.max(0, Math.round((vol + d)*10)/10));
+  if(vol > 0) muted = false;
+  applyVol(); saveAudio(); if(!muted) sfx.click();
+}
+function renderVolume(){
+  rr(VOLW.mx-8, 4, 156, 27, 4);
+  ctx.fillStyle = 'rgba(8,6,5,0.5)'; ctx.fill();
+  const on = !muted && vol > 0.001, cx = VOLW.mx + 6, cy = 18;
+  ctx.fillStyle = on ? '#c9a95f' : '#6a5a3c';
+  ctx.beginPath();
+  ctx.moveTo(cx-6, cy-2.5); ctx.lineTo(cx-3, cy-2.5); ctx.lineTo(cx+1, cy-6.5);
+  ctx.lineTo(cx+1, cy+6.5); ctx.lineTo(cx-3, cy+2.5); ctx.lineTo(cx-6, cy+2.5);
+  ctx.closePath(); ctx.fill();
+  if(on){
+    ctx.strokeStyle = '#c9a95f'; ctx.lineWidth = 1.2;
+    for(const r of [4,7.5]){
+      if(r > 5 && vol < 0.55) continue;
+      ctx.beginPath(); ctx.arc(cx+1, cy, r, -0.85, 0.85); ctx.stroke();
+    }
+  } else {
+    ctx.strokeStyle = '#a0604a'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx+5, cy-4); ctx.lineTo(cx+12, cy+4);
+    ctx.moveTo(cx+12, cy-4); ctx.lineTo(cx+5, cy+4);
+    ctx.stroke();
+  }
+  rr(VOLW.tx, VOLW.ty, VOLW.tw, 4, 2);
+  ctx.fillStyle = 'rgba(120,100,70,0.35)'; ctx.fill();
+  if(!muted && vol > 0){
+    rr(VOLW.tx, VOLW.ty, Math.max(3, VOLW.tw*vol), 4, 2);
+    ctx.fillStyle = '#c9a95f'; ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(VOLW.tx + VOLW.tw*vol, VOLW.ty+2, volDrag ? 5.5 : 4.5, 0, 7);
+  ctx.fillStyle = muted ? '#5a4a30' : '#e8cf92'; ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
+function renderRail(){
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(190,165,110,0.30)'; ctx.font = 'bold 9px Georgia, serif';
+  ctx.fillText('CALL-BACK RAIL', RAIL.x, RAIL.y - 5);
+  const free = !allTrunksBusy();
+  for(let i=0;i<RAIL.slots;i++){
+    const x = RAIL.x + i*152, cb = callbacks[i];
+    ctx.fillStyle = cb ? 'rgba(226,213,182,0.92)' : 'rgba(255,255,255,0.025)';
+    rr(x, RAIL.y, 144, RAIL.h, 3); ctx.fill();
+    ctx.strokeStyle = cb && free ? 'rgba(255,200,110,0.85)' : 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = cb && free ? 1.8 : 1; ctx.stroke();
+    if(!cb) continue;
+    const l = lines[cb.line];
+    ctx.fillStyle = '#3a2c18'; ctx.font = 'bold 12px Georgia, serif';
+    ctx.fillText(l.num + '  ' + (l.party ? 'party line' : shortName(l.name)).slice(0,14), x+8, RAIL.y+17);
+    ctx.font = '11px Georgia, serif'; ctx.fillStyle = '#6a5a3c';
+    ctx.fillText(cb.town + ' ' + cb.tollNum, x+8, RAIL.y+32);
+    const frac = Math.max(0, 1 - (now()-cb.filedAt)/cb.life);
+    ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(x+8, RAIL.y+40, 128, 5);
+    ctx.fillStyle = frac < 0.3 ? '#a8331e' : '#7a6a3c'; ctx.fillRect(x+8, RAIL.y+40, 128*frac, 5);
+    ctx.font = 'bold 9px Georgia, serif';
+    ctx.fillStyle = free ? '#8a5a12' : 'rgba(60,50,36,0.45)';
+    ctx.fillText(free ? 'TRUNK FREE — RING THEM BACK' : 'waiting on a trunk', x+8, RAIL.y+58);
+  }
+}
+
+function render(){
+  ctx.fillStyle = '#0d0a07'; ctx.fillRect(0,0,W,H);
+  if(mode === 'name'){ renderNamePrompt(); renderVolume(); renderRotate(); return; }
+  if(mode === 'scores'){ renderScores(); if(help) renderHelp(); renderVolume(); renderRotate(); return; }
+  if(mode === 'title'){ renderTitle(); if(help) renderHelp(); renderVolume(); renderRotate(); return; }
+
+  const jg = ctx.createLinearGradient(0,JACK.y0,0,JACK.y0+JACK.h);
+  jg.addColorStop(0,'#241c14'); jg.addColorStop(1,'#171109');
+  ctx.fillStyle = jg; rr(JACK.x0,JACK.y0,JACK.w,JACK.h,6); ctx.fill();
+  ctx.strokeStyle = '#3d3020'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.strokeStyle = 'rgba(80,64,40,0.6)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(60, 304); ctx.lineTo(1220, 304); ctx.stroke();
+
+  const wanted = wantedSet();
+  for(const l of lines){
+    if(l.trunk) continue;
+    const calling = l.state === 'calling';
+    if(calling){
+      if(l.urgent){
+        /* their hand is on the hook */
+        ctx.globalAlpha = Math.sin(l.lampT*19) > -0.2 ? 1 : 0.12;
+        lamp(l.x, l.y-26, 5, true, false);
+        ctx.globalAlpha = 1;
+        const beat = 0.5 + 0.5*Math.sin(l.lampT*19);
+        ctx.strokeStyle = 'rgba(255,110,80,' + (0.35 + 0.45*beat) + ')';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.arc(l.x, l.y, 17 + beat*3, 0, 7); ctx.stroke();
+      } else {
+        ctx.globalAlpha = 0.65 + 0.35*(Math.sin(l.lampT*4.5)*0.5+0.5);
+        lamp(l.x, l.y-26, 5, true, false);
+        ctx.globalAlpha = 1;
+      }
+    } else lamp(l.x, l.y-26, 5, l.ringT > 0, true);
+    if(wanted.has(l.id)) drawWantGlow(l.x, l.y, 11);
+    const busySeen = D.busyVisible && !calling && lineBusy(l);
+    drawJackHole(l.x, l.y, 11, busySeen ? '#9c4a34' : null);
+
+    ctx.textAlign = 'center';
+    /* a party wire is called out by the cool tint on its number */
+    ctx.fillStyle = l.party ? '#8fb6c4' : '#c9a95f'; ctx.font = 'bold 14px Georgia, serif';
+    ctx.fillText(l.num, l.x, l.y+29);
+    if(l.party){
+      const names = l.members.map(m => shortName(m.name)).join(' · ');
+      let fs = 9;
+      ctx.font = fs+'px Georgia, serif';
+      while(ctx.measureText(names).width > 142 && fs > 6.5){ fs -= 0.5; ctx.font = fs+'px Georgia, serif'; }
+      ctx.fillStyle = 'rgba(175,200,210,0.55)';
+      ctx.fillText(names, l.x, l.y+41);
+    } else {
+      ctx.fillStyle = 'rgba(190,170,130,0.55)'; ctx.font = '11px Georgia, serif';
+      ctx.fillText(l.name, l.x, l.y+42);
+    }
+  }
+
+  /* the toll trunks — their busy lamps are honest, unlike the subscriber jacks */
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(190,165,110,0.30)'; ctx.font = 'bold 9px Georgia, serif';
+  ctx.fillText('TOLL TRUNKS', 62, RAIL.y - 5);
+  for(const t of trunks){
+    lamp(t.x, t.y-26, 5, lineBusy(t), false);
+    if(wanted.has(t.id)) drawWantGlow(t.x, t.y, 12);
+    drawJackHole(t.x, t.y, 12);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = lineBusy(t) ? 'rgba(200,120,90,0.8)' : '#8fc39a';
+    ctx.font = 'bold 11px Georgia, serif';
+    ctx.fillText(t.name, t.x, t.y+26);
+  }
+  renderRail();
+
+  const sg = ctx.createLinearGradient(0,SHELF_Y,0,H);
+  sg.addColorStop(0,'#2b2115'); sg.addColorStop(1,'#120d08');
+  ctx.fillStyle = sg; ctx.fillRect(0, SHELF_Y, W, H-SHELF_Y);
+  ctx.strokeStyle = '#4a3a24'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0,SHELF_Y); ctx.lineTo(W,SHELF_Y); ctx.stroke();
+
+  for(const p of pairs){
+    if(p.broken){
+      /* springs stopped off, keys dead, a card over the ticket */
+      for(const e of ['front','back']){
+        const s = springPos(p,e);
+        ctx.beginPath(); ctx.arc(s.x,s.y,12,0,7);
+        ctx.fillStyle = '#0a0705'; ctx.fill();
+        ctx.strokeStyle = '#3a2f1e'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.strokeStyle = 'rgba(160,80,60,0.5)'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(s.x-7, s.y-7); ctx.lineTo(s.x+7, s.y+7);
+        ctx.moveTo(s.x+7, s.y-7); ctx.lineTo(s.x-7, s.y+7);
+        ctx.stroke();
+        lamp(s.x, SUPY, 4.5, false, true);
+      }
+      const bk = keyRects(p);
+      for(const r of [bk.listen, bk.ring]){
+        rr(r.x, r.y, r.w, r.h, 3);
+        ctx.fillStyle = 'rgba(12,9,6,0.9)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(70,56,38,0.6)'; ctx.lineWidth = 1; ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(46,34,24,0.75)';
+      rr(p.x-70, TICKY, 140, TICKH, 3); ctx.fill();
+      ctx.strokeStyle = 'rgba(160,80,60,0.45)'; ctx.lineWidth = 1.4; ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(200,110,85,0.85)'; ctx.font = 'bold 12px Georgia, serif';
+      ctx.fillText('OUT OF', p.x, TICKY + 52);
+      ctx.fillText('ORDER', p.x, TICKY + 68);
+      ctx.fillStyle = 'rgba(150,110,90,0.5)'; ctx.font = 'italic 10px Georgia, serif';
+      ctx.fillText('cords away for repair', p.x, TICKY + 88);
+      ctx.fillStyle = 'rgba(160,90,70,0.5)'; ctx.font = 'bold 11px Georgia, serif';
+      ctx.fillText('PAIR ' + (p.id+1), p.x, TICKY+TICKH+15);
+      continue;
+    }
+    for(const e of ['front','back']){
+      const s = springPos(p,e);
+      ctx.beginPath(); ctx.arc(s.x,s.y,12,0,7);
+      ctx.fillStyle = '#0d0906'; ctx.fill();
+      ctx.strokeStyle = '#4d3f28'; ctx.lineWidth = 2; ctx.stroke();
+      const l = endLine(p,e), snoop = l != null && lines[l].snoop;
+      const flick = snoop && Math.sin(shiftT*9 + p.id) > 0.1;
+      lamp(s.x, SUPY, 4.5, supLit(p,e) || flick, true);
+    }
+    const k = keyRects(p);
+    drawKey(k.listen, p.listen, 'LSN');
+    drawKey(k.ring, p.ring, 'RNG');
+
+    const c = p.call;
+    ctx.fillStyle = c ? 'rgba(226,213,182,0.94)' : 'rgba(60,50,36,0.5)';
+    rr(p.x-70, TICKY, 140, TICKH, 3); ctx.fill();
+    if(c && c.urgent){
+      const beat = 0.5 + 0.5*Math.sin(shiftT*19);
+      ctx.strokeStyle = 'rgba(255,110,80,' + (0.5 + 0.5*beat) + ')'; ctx.lineWidth = 2.4;
+    } else {
+      ctx.strokeStyle = c && c.toll ? 'rgba(120,160,190,0.8)' : 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = c && c.toll ? 1.8 : 1;
+    }
+    ctx.stroke();
+    ctx.textAlign = 'left';
+    if(c){
+      ctx.fillStyle = '#3a2c18'; ctx.font = 'bold 12px Georgia, serif';
+      let head = c.phase === 'callback' ? 'CALL BACK'
+               : !c.heardIt ? 'number?'
+               : c.child ? 'a child — no number'
+               : c.lonely ? 'no number' : wantLabel(c);
+      /* on a party wire the caller names the line out loud, so write it on the note */
+      if(c.heardIt && !c.toll && !c.inquiry && c.want != null && lines[c.want].party)
+        head = lines[c.want].num + '  ' + head;
+      let hf = 12;
+      ctx.font = 'bold ' + hf + 'px Georgia, serif';
+      while(ctx.measureText(head).width > 124 && hf > 8){ hf -= 0.5; ctx.font = 'bold ' + hf + 'px Georgia, serif'; }
+      ctx.fillText(head, p.x-62, TICKY+15);
+
+      let st = '', warn = c.busyKnown || c.wrong || c.badCode;
+      if(c.child && c.heardIt && !c.resolved) st = childErrand[0];
+      else if(c.lonely && c.heardIt && !c.resolved) st = 'she only wants to talk';
+      else if(c.promiseAsk && c.heardIt) st = 'she asks a favour';
+      else if(c.policeAsk && c.heardIt) st = 'the Sheriff asks';
+      else if(c.eavesAsk && c.heardIt) st = 'he asks a thing you should not';
+      else if(c.eavesTarget && c.phase === 'live') st = 'not yours to hear';
+      else if(c.phase === 'callback') st = 'ring them back';
+      else if(c.phase === 'answered') st = c.busyKnown ? 'BUSY — report it'
+        : !c.heardIt ? 'line open'
+        : c.resolved ? 'ready to take down'
+        : c.toll ? (c.ringAcc > 0 ? 'raising ' + c.town + '…' : 'wants a trunk')
+        : c.badCode ? 'no one picked up'
+        : c.ringAcc > 0 ? 'ringing' : 'waiting';
+      else if(c.phase === 'live') st = c.wrong ? 'wrong party'
+        : c.toll ? 'toll — talking'
+        : c.talked > 55 ? 'still talking…' : 'talking';
+      else if(c.phase === 'hungup') st = 'both hung up';
+      ctx.fillStyle = warn ? '#8c2f1e' : '#6a5a3c';
+      ctx.font = 'italic 10px Georgia, serif';
+      ctx.fillText(st, p.x-62, TICKY+27);
+
+      let logTop = TICKY+42;
+      /* the ring code for a party line, and whatever you have tapped so far */
+      if(c.heardIt && !c.toll && !c.inquiry && c.want != null && lines[c.want].party && !c.resolved){
+        const code = lines[c.want].members[c.wantMember].code;
+        ctx.font = '9px Georgia, serif'; ctx.fillStyle = '#6a5a3c';
+        ctx.fillText('ring', p.x-62, TICKY+40);
+        drawCode(p.x-42, TICKY+35, code, '#3a2c18');
+        if(p.pattern.length){
+          ctx.fillStyle = '#8a7a5c'; ctx.fillText('you', p.x-62, TICKY+52);
+          drawCode(p.x-42, TICKY+47, p.pattern, '#8c6a2f');
+        }
+        logTop = TICKY+62;
+      }
+      if(c.toll && c.phase === 'answered' && !c.resolved && c.ringAcc > 0){
+        ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(p.x-62, TICKY+36, 124, 5);
+        ctx.fillStyle = '#3f6a8c'; ctx.fillRect(p.x-62, TICKY+36, 124*Math.min(1,c.ringAcc/3.2), 5);
+        logTop = TICKY+52;
+      }
+
+      ctx.font = '10px Georgia, serif';
+      let yy = logTop;
+      for(const ln of c.log.slice(-3)){
+        ctx.fillStyle = ln.who === 'op' ? '#7a6a4c' : '#3a2c18';
+        for(const w of wrap((ln.who === 'op' ? '– ' : '» ') + ln.text, 126).slice(0,2)){
+          if(yy > TICKY+TICKH-5) break;
+          ctx.fillText(w, p.x-62, yy); yy += 11;
+        }
+      }
+    } else {
+      ctx.fillStyle = 'rgba(180,160,120,0.25)'; ctx.font = '10px Georgia, serif';
+      ctx.fillText('free', p.x-62, TICKY+15);
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(190,165,110,0.4)'; ctx.font = 'bold 11px Georgia, serif';
+    ctx.fillText('PAIR ' + (p.id+1), p.x, TICKY+TICKH+15);
+  }
+
+  for(const p of pairs) for(const e of ['front','back']){
+    if(endLine(p,e) == null && !dragging(p,e) && !retractOf(p,e)) continue;
+    drawCord(springPos(p,e), plugPos(p,e),
+             e === 'front' ? '#4b2c20' : '#22343c',
+             dragging(p,e) ? 'rgba(255,210,150,0.35)' : null);
+  }
+  for(const x of crossings()){
+    ctx.beginPath(); ctx.arc(x.x, x.y, 4.5, 0, 7);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x.x-1, x.y-1, 1.6, 0, 7);
+    ctx.fillStyle = 'rgba(255,200,140,0.16)'; ctx.fill();
+  }
+  for(const p of pairs) for(const e of ['front','back']){
+    const pp = plugPos(p,e);
+    drawPlug(pp.x, pp.y, endLine(p,e) == null && !dragging(p,e) && !retractOf(p,e));
+  }
+
+  if(drag && drag.active && drag.hoverJack){
+    const j = drag.hoverJack;
+    if(drag.test){
+      ctx.textAlign = 'center'; ctx.font = 'bold 12px Georgia, serif';
+      ctx.fillStyle = drag.test === 'busy' ? '#ff6a4a' : '#7fd08a';
+      ctx.fillText(drag.test === 'busy' ? 'BUSY' : 'FREE', j.x, j.y-42);
+    } else {
+      ctx.beginPath(); ctx.arc(j.x, j.y, 15 + (1-Math.min(1,drag.hoverT/0.35))*7, 0, 7);
+      ctx.strokeStyle = 'rgba(255,220,150,0.28)'; ctx.lineWidth = 1.4; ctx.stroke();
+    }
+  }
+  ctx.textAlign = 'center';
+  for(const f of floats){
+    ctx.globalAlpha = (f.t < 0.4 ? f.t/0.4 : Math.max(0, 1-(f.t-0.4)/3.8)) * 0.9;
+    ctx.font = 'italic 13px Georgia, serif'; ctx.fillStyle = '#d7c08c';
+    ctx.fillText(f.text, Math.max(190, Math.min(W-190, f.x)), f.y - f.t*16);
+    ctx.globalAlpha = 1;
+  }
+
+  renderTutHi();
+  renderStatus();
+  renderCoach();
+  if(mode === 'report') renderReport();
+  if(paused) renderPauseMenu();
+  if(help) renderHelp();
+  renderVolume();
+  renderRotate();
+}
+/* a switchboard is wider than it is tall; a phone held upright is not */
+function renderRotate(){
+  if(!touchMode || window.innerWidth >= window.innerHeight) return;
+  ctx.fillStyle = 'rgba(6,5,4,0.96)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign = 'center';
+  ctx.strokeStyle = '#8a7546'; ctx.lineWidth = 3;
+  rr(W/2-70, H/2-150, 140, 92, 8); ctx.stroke();
+  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 34px Georgia, serif';
+  ctx.fillText('Turn the board sideways', W/2, H/2 + 10);
+  ctx.fillStyle = '#bda878'; ctx.font = '17px Georgia, serif';
+  ctx.fillText('A switchboard is wider than it is tall. So is this one.', W/2, H/2 + 48);
+}
+function clockStr(){
+  const total = SHIFT_START + Math.floor((Math.min(shiftT,SHIFT_LEN)/SHIFT_LEN)*SHIFT_HOURS*60);
+  const h24 = ((total/60)|0) % 24;
+  const h = (h24 % 12) || 12;
+  return h + ':' + String(total%60).padStart(2,'0') + ' ' + (h24 < 12 ? 'AM' : 'PM');
+}
+function renderStatus(){
+  ctx.fillStyle = '#080605'; ctx.fillRect(0,0,W,36);
+  ctx.strokeStyle = '#332818'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0,36.5); ctx.lineTo(W,36.5); ctx.stroke();
+
+  const waiting = calls.filter(c => c.phase === 'lamp').length;
+  const avg = stats.answered ? stats.answerSum/stats.answered : 0;
+  const freeT = trunks.filter(t => !lineBusy(t)).length;
+  ctx.textAlign = 'left'; ctx.font = '13px Georgia, serif';
+  ctx.fillStyle = '#8a7546'; ctx.fillText(D.name, 22, 24);
+  ctx.fillText(clockStr(), 140, 24);
+  ctx.fillStyle = waiting > 3 ? '#ff8a4d' : '#c9a95f';
+  ctx.fillText('LAMPS  ' + waiting, 220, 24);
+  ctx.fillStyle = (avg > 0 && avg < 6) ? '#9ed3a4' : '#c9a95f';
+  ctx.fillText('ANSWER  ' + (stats.answered ? avg.toFixed(1)+'s' : '—'), 310, 24);
+  ctx.fillStyle = freeT ? '#8fc39a' : '#ff6a4a';
+  ctx.fillText('TRUNKS  ' + freeT + '/3', 470, 24);
+  ctx.fillStyle = callbacks.length ? '#e0b96a' : '#6a5a3c';
+  ctx.fillText('SLIPS  ' + callbacks.length, 584, 24);
+  ctx.fillStyle = '#c9a95f'; ctx.fillText('DONE  ' + stats.completed, 674, 24);
+  const room = ALLOW - stats.abandoned;
+  ctx.fillStyle = room <= 1 ? '#ff6a4a' : (room <= 2 ? '#e08a5a' : (stats.abandoned ? '#c9a95f' : '#6a5a3c'));
+  ctx.fillText('LOST  ' + stats.abandoned + '/' + ALLOW, 770, 24);
+  ctx.fillStyle = stats.errors ? '#ff6a4a' : '#6a5a3c';
+  ctx.fillText('MARKS  ' + stats.errors, 864, 24);
+  ctx.fillStyle = '#8a7546';
+  ctx.fillText('DAY ' + day + (day > 1 ? '   +' + thicker(day) + '%' : ''), 958, 24);
+  drawMiniBtn(BTN.help, '?', 13);
+
+  ctx.textAlign = 'center'; ctx.font = '13px Georgia, serif';
+  let y = 58;
+  for(const m of msgs){
+    ctx.globalAlpha = Math.max(0, 1-m.t/5);
+    ctx.fillStyle = m.bad ? '#ff7a5a' : '#a8c8a0';
+    ctx.fillText(m.text, W/2, y); y += 17;
+    ctx.globalAlpha = 1;
+  }
+  if(tut) return;    /* the walk-through banner sits where the hint line goes */
+  ctx.textAlign = 'left'; ctx.font = '11px Georgia, serif'; ctx.fillStyle = 'rgba(150,130,95,0.35)';
+  ctx.fillText('drag plugs · hold a plug over a jack to flick-test · 1–8 listening key · Q–I ringing key (hold, or tap a party code) · H help · M mute · [ ] volume', 22, H-13);
+}
+function renderHelp(){
+  ctx.fillStyle = 'rgba(6,5,4,0.95)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#e0c98a'; ctx.font = 'bold 24px Georgia, serif';
+  ctx.fillText('The position', 96, 62);
+  ctx.font = '14px Georgia, serif'; ctx.fillStyle = '#bda878';
+  const col1 = [
+    'A lamp lights when a subscriber lifts their receiver. It will not wait long.',
+    '',
+    '1.   Drag the FRONT plug (left of a pair, red cord) into the lit jack.',
+    '2.   Throw that pair’s LISTENING key. You cannot hear a word without it.',
+    '3.   Take the BACK plug (right, blue cord) and hold it over the wanted jack',
+    '      for a moment to FLICK-TEST. A double click means that line is busy',
+    '      elsewhere on the board — there is no other way to know, and the jack',
+    '      looks no different. Plug into a busy one and you cut into a conversation.',
+    '4.   If it is free, plug in and HOLD the RINGING key until they answer.',
+    '5.   Release the listening key. The call is no longer yours.',
+    '',
+    'The two lamps beneath each pair are SUPERVISORY. Lit means that end is on',
+    'the hook. Both lit means the call is over — pull the cords and get your pair',
+    'back. Eight pairs is the whole of your capacity. Cords that cross will snag',
+    'when you reach for them, and nobody will tell you that you have snarled the',
+    'shelf. It is against the rules to leave the listening key thrown once a call is',
+    'connected. Miss Pryor walks the aisle.'
+  ];
+  const col2 = [
+    'PARTY LINES',
+    'Some wires carry two or three households. One jack, one number, several',
+    'people — so a caller asks for a person, not a line, and the ticket shows you',
+    'that household’s RING CODE:  a long bar is a long ring, a short bar a short.',
+    '',
+    'Tap the code out on the ringing key. A long hold makes a long, a quick tap',
+    'makes a short, and a pause of a second ends the code and rings it out. Get it',
+    'wrong and you fetch a neighbour to the telephone at this hour.',
+    '',
+    'The whole wire is busy when any one of them is on it. And the others can',
+    'lift their receivers to listen — you will see it in the supervisory lamp.',
+    '',
+    'TOLL TRUNKS',
+    'Out-of-town calls do not go through you. They go over one of three trunk',
+    'circuits to the next exchange, and their busy lamps are honest — you can',
+    'see what is free. Plug into a trunk and hold the ringing key a good long',
+    'pull to raise the operator at the far end. Toll calls talk for a long while,',
+    'and they hold that trunk the entire time.',
+    '',
+    'When every trunk is taken, take your cords down: that files a slip on the',
+    'CALL-BACK RAIL. When a trunk clears, plug a front cord into that',
+    'subscriber and ring THEM — the only time the board works backwards.',
+    'Let a slip run out and it is a mark against you.'
+  ];
+  let y = 96;
+  for(const t of col1){ ctx.fillText(t, 96, y); y += 21; }
+  y = 96;
+  for(const t of col2){
+    ctx.fillStyle = (t === 'PARTY LINES' || t === 'TOLL TRUNKS') ? '#e0c98a' : '#bda878';
+    ctx.font = (t === 'PARTY LINES' || t === 'TOLL TRUNKS') ? 'bold 13px Georgia, serif' : '14px Georgia, serif';
+    ctx.fillText(t, 664, y); y += 21;
+  }
+  ctx.fillStyle = 'rgba(160,200,170,0.8)'; ctx.font = 'bold 12px Georgia, serif';
+  ctx.fillText('ON A TOUCH SCREEN', 96, H-58);
+  ctx.fillStyle = 'rgba(190,170,130,0.8)'; ctx.font = '13px Georgia, serif';
+  ctx.fillText('Drag the plugs — the plug rides above your fingertip so you can see the jack. Rest it on a jack '
+             + 'for a moment to flick-test. Tap LSN and RNG. One finger can hold a', 96, H-40);
+  ctx.fillText('ringing key (or tap out a party code) while another works a cord. The ? and speaker at the '
+             + 'top right stand in for the keyboard. Hold the device sideways.', 96, H-23);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(190,170,130,0.5)'; ctx.font = 'italic 13px Georgia, serif';
+  ctx.fillText('H, or a tap, closes this.', W-96, H-23);
+  ctx.textAlign = 'left';
+}
+function renderTitle(){
+  const g = ctx.createRadialGradient(W/2,320,20,W/2,320,540);
+  g.addColorStop(0,'rgba(255,180,90,0.10)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 62px Georgia, serif';
+  ctx.fillText('HOLD, PLEASE', W/2, 300);
+  ctx.fillStyle = '#8a7546'; ctx.font = '18px Georgia, serif';
+  ctx.fillText('Verity Exchange · Position 4 · ' + weekdayOf(day) + ', four in the afternoon', W/2, 344);
+  ctx.fillStyle = '#bda878'; ctx.font = '15px Georgia, serif';
+  ctx.fillText('Eight cord pairs, twenty-four lines, three trunks out of town. One of you.', W/2, 396);
+
+  ctx.fillStyle = 'rgba(190,165,110,0.4)'; ctx.font = 'bold 10px Georgia, serif';
+  ctx.fillText('WHAT ARE YOU SIGNED ON AS?   (1, 2, 3)', W/2, 432);
+  for(let i=0;i<DIFFS.length;i++){
+    const d = DIFFS[i], on = i === diff, y = DIFFY[i];
+    if(on){
+      rr(W/2-372, y-19, 744, 40, 4);
+      ctx.fillStyle = 'rgba(255,200,120,0.07)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,200,120,0.35)'; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+    ctx.textAlign = 'right';
+    ctx.fillStyle = on ? '#e8cf92' : 'rgba(170,150,110,0.5)';
+    ctx.font = 'bold 14px Georgia, serif';
+    ctx.fillText(d.name, W/2-150, y-2);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = on ? 'rgba(200,180,135,0.9)' : 'rgba(150,130,95,0.4)';
+    ctx.font = '12px Georgia, serif';
+    const rows = wrap(d.blurb, 500);
+    ctx.fillText(rows[0], W/2-136, y-7);
+    if(rows[1]) ctx.fillText(rows[1], W/2-136, y+8);
+    ctx.textAlign = 'center';
+  }
+
+  ctx.fillStyle = 'rgba(200,180,135,0.9)'; ctx.font = '14px Georgia, serif';
+  ctx.fillText(day === 1
+    ? 'Day one. This is the pace the board keeps before it has learned your name.'
+    : 'Day ' + day + ' — the traffic runs ' + thicker(day) + '% thicker than your first night.',
+    W/2, 590);
+  ctx.fillStyle = 'rgba(224,138,90,0.85)'; ctx.font = '13px Georgia, serif';
+  ctx.fillText('Lose ' + ALLOW + ' calls in a night — whatever you are signed on as — and the run ends. '
+             + 'You start again at day one.', W/2, 610);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = tutorialOn ? 'rgba(160,200,170,0.75)' : 'rgba(150,130,95,0.5)';
+  ctx.font = '13px Georgia, serif';
+  ctx.fillText('walk-through for your first call: ' + (tutorialOn ? 'ON' : 'OFF'), W/2, 638);
+  ctx.strokeStyle = 'rgba(190,165,110,0.2)'; ctx.lineWidth = 1;
+  rr(TBTN.tut.x, TBTN.tut.y, TBTN.tut.w, TBTN.tut.h, 3); ctx.stroke();
+
+  ctx.fillStyle = 'rgba(190,170,130,0.7)'; ctx.font = 'italic 13px Georgia, serif';
+  ctx.fillText('the record sheet', W/2 - 180, 666);
+  ctx.strokeStyle = 'rgba(190,165,110,0.18)';
+  rr(TBTN.scores.x, TBTN.scores.y, TBTN.scores.w, TBTN.scores.h, 3); ctx.stroke();
+  if(day > 1){
+    ctx.fillStyle = 'rgba(150,130,95,0.55)';
+    ctx.fillText('go back to day one', W/2 + 180, 666);
+    ctx.strokeStyle = 'rgba(190,165,110,0.14)';
+    rr(TBTN.reset.x, TBTN.reset.y, TBTN.reset.w, TBTN.reset.h, 3); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(190,170,130,0.55)'; ctx.font = 'italic 13px Georgia, serif';
+  ctx.fillText('Press H for the operating instructions.', W/2, 694);
+  ctx.fillStyle = 'rgba(255,200,120,' + (0.45 + 0.35*Math.sin(performance.now()/450)) + ')';
+  ctx.font = 'bold 17px Georgia, serif';
+  ctx.fillText('—  TAKE THE POSITION  —', W/2, 730);
+}
+function menuBtn(r, label, sub, warm){
+  rr(r.x, r.y, r.w, r.h, 4);
+  ctx.fillStyle = warm ? 'rgba(200,90,60,0.10)' : 'rgba(255,255,255,0.045)'; ctx.fill();
+  ctx.strokeStyle = warm ? 'rgba(224,138,90,0.45)' : 'rgba(190,165,110,0.32)';
+  ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 15px Georgia, serif';
+  ctx.fillStyle = warm ? '#e0a084' : '#e0c98a';
+  ctx.fillText(label, r.x + r.w/2, r.y + (sub ? 21 : 28));
+  if(sub){
+    ctx.font = 'italic 11px Georgia, serif'; ctx.fillStyle = 'rgba(180,160,120,0.55)';
+    ctx.fillText(sub, r.x + r.w/2, r.y + 36);
+  }
+}
+function renderPauseMenu(){
+  ctx.fillStyle = 'rgba(6,5,4,0.88)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 34px Georgia, serif';
+  ctx.fillText('THE BOARD IS WAITING', W/2, 236);
+  ctx.fillStyle = '#8a7546'; ctx.font = '15px Georgia, serif';
+  ctx.fillText('Day ' + day + ' · ' + clockStr() + ' · ' + stats.completed + ' put through, '
+             + stats.abandoned + ' of ' + ALLOW + ' lost', W/2, 272);
+  menuBtn(MENU.resume, 'BACK TO THE POSITION', 'escape');
+  menuBtn(MENU.help,   'OPERATING INSTRUCTIONS', 'H');
+  menuBtn(MENU.quit,   'GIVE UP THE SHIFT', 'Q  ·  the run ends here, back to day one', true);
+}
+
+const nameBox = document.getElementById('nameentry');
+nameBox.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if(e.key === 'Enter'){ commitName(nameBox.value); hideNameBox(); mode = 'scores'; sfx.good(); }
+});
+function showNameBox(){
+  nameBox.value = '';
+  nameBox.style.display = 'block';
+  try{ nameBox.focus(); }catch(e){}
+}
+function hideNameBox(){
+  nameBox.style.display = 'none';
+  try{ nameBox.blur(); }catch(e){}
+}
+
+function renderNamePrompt(){
+  if(nameBox.style.display !== 'block') showNameBox();
+  ctx.fillStyle = '#0d0a07'; ctx.fillRect(0,0,W,H);
+  const g = ctx.createRadialGradient(W/2,330,20,W/2,330,520);
+  g.addColorStop(0,'rgba(255,180,90,0.10)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 34px Georgia, serif';
+  ctx.fillText('YOU ARE ON THE SHEET', W/2, 210);
+  ctx.fillStyle = '#bda878'; ctx.font = '17px Georgia, serif';
+  ctx.fillText('Day ' + pending.day + ' · ' + pending.done + ' calls put through · '
+             + pending.acc + '% of everything offered · as ' + DIFFS[pending.d].name.toLowerCase(),
+               W/2, 250);
+  ctx.fillStyle = 'rgba(255,200,120,0.9)'; ctx.font = 'bold 20px Georgia, serif';
+  ctx.fillText(ordinal(pending.rank) + ' place', W/2, 292);
+  ctx.fillStyle = 'rgba(190,170,130,0.65)'; ctx.font = 'italic 14px Georgia, serif';
+  ctx.fillText('Miss Pryor keeps a sheet of the girls who lasted. Put your name to it.', W/2, 332);
+
+  rr(SBACK.x, SBACK.y, SBACK.w, SBACK.h, 4);
+  ctx.fillStyle = 'rgba(255,200,120,0.09)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,200,120,0.5)'; ctx.lineWidth = 1.4; ctx.stroke();
+  ctx.font = 'bold 14px Georgia, serif'; ctx.fillStyle = '#e8cf92';
+  ctx.fillText('SIGN IT', W/2, SBACK.y + 21);
+  ctx.fillStyle = 'rgba(150,130,95,0.5)'; ctx.font = 'italic 12px Georgia, serif';
+  ctx.fillText('or press return', W/2, SBACK.y + 46);
+}
+function ordinal(n){
+  const s = ['th','st','nd','rd'], v = n % 100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
+}
+function renderScores(){
+  ctx.fillStyle = '#0d0a07'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e8cf92'; ctx.font = 'bold 30px Georgia, serif';
+  ctx.fillText('THE RECORD SHEET', W/2, 70);
+  ctx.font = '13px Georgia, serif'; ctx.fillStyle = '#8a7546';
+  ctx.fillText('Verity Exchange · Position 4 · every night worked', W/2, 94);
+
+  const labels = ['ALL', ...DIFFS.map(d => d.name)];
+  for(let i=0;i<SFILT.length;i++){
+    const r = SFILT[i], on = scoreFilter === i-1;
+    rr(r.x, r.y, r.w, r.h, 3);
+    ctx.fillStyle = on ? 'rgba(255,200,120,0.10)' : 'rgba(255,255,255,0.025)'; ctx.fill();
+    ctx.strokeStyle = on ? 'rgba(255,200,120,0.5)' : 'rgba(190,165,110,0.2)';
+    ctx.lineWidth = on ? 1.6 : 1; ctx.stroke();
+    ctx.font = 'bold 12px Georgia, serif';
+    ctx.fillStyle = on ? '#e8cf92' : 'rgba(170,150,110,0.55)';
+    ctx.fillText(labels[i], r.x + r.w/2, r.y + 20);
+  }
+
+  const rows = scoreRows();
+  if(!rows.length){
+    ctx.font = 'italic 16px Georgia, serif'; ctx.fillStyle = 'rgba(180,160,120,0.5)';
+    ctx.fillText('Nothing on the sheet yet. Work a night and come back.', W/2, 300);
+  } else {
+    /* the three figures that matter */
+    const best = [
+      ['DAYS REACHED',       Math.max(...rows.map(r => r.day))],
+      ['CALLS IN A NIGHT',   Math.max(...rows.map(r => r.done))],
+      ['BEST ACCURACY',      Math.max(...rows.map(r => r.acc)) + '%']
+    ];
+    for(let i=0;i<3;i++){
+      const cx = W/2 - 300 + i*300;
+      ctx.font = 'bold 11px Georgia, serif'; ctx.fillStyle = '#8a7546';
+      ctx.fillText(best[i][0], cx, 194);
+      ctx.font = 'bold 40px Georgia, serif'; ctx.fillStyle = '#e8cf92';
+      ctx.fillText(String(best[i][1]), cx, 236);
+    }
+    const tot = rows.reduce((a,r) => ({ done:a.done+r.done, lost:a.lost+r.lost }), {done:0,lost:0});
+    ctx.font = '13px Georgia, serif'; ctx.fillStyle = 'rgba(190,170,130,0.7)';
+    ctx.fillText(rows.length + ' nights worked · ' + tot.done + ' calls put through · '
+               + (tot.done+tot.lost ? Math.round(tot.done/(tot.done+tot.lost)*100) : 0)
+               + '% of everything offered', W/2, 266);
+
+  }
+
+  /* the sheet proper: named runs, best first */
+  const lead = leaderRows();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 11px Georgia, serif'; ctx.fillStyle = '#8a7546';
+  ctx.fillText('THE GIRLS WHO LASTED', W/2, 300);
+  if(!lead.length){
+    ctx.font = 'italic 15px Georgia, serif'; ctx.fillStyle = 'rgba(180,160,120,0.45)';
+    ctx.fillText('No names yet. A run goes on the sheet when the chief pulls you off the board.', W/2, 340);
+  } else {
+    const COL = [W/2-350, W/2-300, W/2-90, W/2+75, W/2+185, W/2+300];
+    const head = ['','NAME','SIGNED ON','DAY','CALLS','ACCURACY'];
+    ctx.font = 'bold 11px Georgia, serif'; ctx.fillStyle = '#8a7546';
+    for(let i=0;i<head.length;i++){ ctx.textAlign = i<3 ? 'left' : 'right'; ctx.fillText(head[i], COL[i], 322); }
+    ctx.strokeStyle = 'rgba(120,100,70,0.3)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(W/2-356, 330); ctx.lineTo(W/2+306, 330); ctx.stroke();
+    let y = 352;
+    lead.slice(0, LEADER_SLOTS).forEach((r, i) => {
+      const mine = pending && r.cid === pending.cid && r.name;
+      if(mine){
+        rr(W/2-356, y-15, 662, 22, 3);
+        ctx.fillStyle = 'rgba(255,200,120,0.10)'; ctx.fill();
+      }
+      const cells = [ordinal(i+1), r.name, DIFFS[r.d] ? DIFFS[r.d].name.toLowerCase() : '—',
+                     String(r.day), String(r.done), r.acc + '%'];
+      ctx.font = (mine ? 'bold ' : '') + '14px Georgia, serif';
+      for(let j=0;j<cells.length;j++){
+        ctx.textAlign = j<3 ? 'left' : 'right';
+        ctx.fillStyle = mine ? '#e8cf92' : (j === 0 ? '#8a7546' : 'rgba(200,180,135,0.8)');
+        ctx.fillText(cells[j], COL[j], y);
+      }
+      y += 24;
+    });
+    /* and where this run stood, whether or not it made the sheet */
+    if(pending){
+      y += 12;
+      ctx.textAlign = 'center'; ctx.font = 'italic 14px Georgia, serif';
+      ctx.fillStyle = pending.qualifies ? 'rgba(160,205,175,0.9)' : 'rgba(224,138,90,0.9)';
+      ctx.fillText(pending.qualifies
+        ? 'Your run stands ' + ordinal(pending.rank) + '.'
+        : 'Your run placed ' + ordinal(pending.rank) + ' — not far enough for the sheet. '
+          + 'Day ' + pending.day + ', ' + pending.done + ' calls, ' + pending.acc + '%.',
+        W/2, y);
+    }
+  }
+
+  ctx.textAlign = 'center';
+  rr(SBACK.x, SBACK.y, SBACK.w, SBACK.h, 4);
+  ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(190,165,110,0.3)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.font = 'bold 14px Georgia, serif'; ctx.fillStyle = 'rgba(210,190,145,0.85)';
+  ctx.fillText(pending ? 'BEGIN AGAIN AT DAY ONE' : 'BACK', W/2, SBACK.y + 21);
+}
+function renderReport(){
+  ctx.fillStyle = 'rgba(6,5,4,0.94)'; ctx.fillRect(0,0,W,H);
+  const avg = stats.answered ? stats.answerSum/stats.answered : 99;
+  ctx.textAlign = 'center';
+  const dshown = (stats.failed && pending) ? pending.day : day;
+  ctx.fillStyle = stats.failed ? '#e07a5a' : '#e8cf92'; ctx.font = 'bold 32px Georgia, serif';
+  ctx.fillText('DAY ' + dshown + (stats.failed
+    ? (stats.walked ? ' · YOU WALKED OFF' : ' · TAKEN OFF THE POSITION')
+    : ' · SHIFT REPORT'), W/2, 76);
+  ctx.font = '14px Georgia, serif'; ctx.fillStyle = '#8a7546';
+  ctx.fillText('Verity Exchange · ' + weekdayOf(dshown) + ' · ' + D.name.toLowerCase()
+             + ' · initialled A.P.', W/2, 100);
+
+  const rows = [
+    ['Calls answered', stats.answered],
+    ['Average answering time', stats.answered ? avg.toFixed(1)+' seconds' : '—'],
+    ['Fastest', stats.best < 999 ? stats.best.toFixed(1)+' seconds' : '—'],
+    ['Completed', stats.completed],
+    ['Toll calls put through', stats.toll],
+    ['Call-backs kept / broken', stats.kept + ' / ' + stats.broken],
+    ['Lost or abandoned', stats.abandoned],
+    ['Marks against', stats.errors]
+  ];
+  ctx.font = '15px Georgia, serif';
+  let y = 146;
+  for(const [k,v] of rows){
+    ctx.textAlign = 'right'; ctx.fillStyle = '#a89468'; ctx.fillText(k, W/2-20, y);
+    ctx.textAlign = 'left';  ctx.fillStyle = '#e8cf92'; ctx.fillText(String(v), W/2+20, y);
+    y += 27;
+  }
+  const score = avg + stats.errors*0.8 + stats.abandoned*0.5 + stats.broken*1.5;
+  let note = CHIEF[CHIEF.length-1][1];
+  for(const [th,n] of CHIEF) if(score <= th){ note = n; break; }
+  if(stats.failed) note = stats.walked
+    ? '“You took the headset off in the middle of a shift. Ruth has your cords now. '
+    + 'Whatever you had built here, you have given it back.”'
+    : '“That is enough. Ruth will finish the night — she has been standing behind you for ten minutes. '
+    + 'Go home. Whatever you had built here, it is gone.”';
+  ctx.textAlign = 'center'; ctx.font = 'italic 15px Georgia, serif'; ctx.fillStyle = '#d7c08c';
+  y += 14;
+  for(const w of wrap(note, 780)){ ctx.fillText(w, W/2, y); y += 23; }
+  /* nudge them off the help once they can hold the board down without it */
+  if(!stats.failed && diff < DIFFS.length-1 && stats.completed >= 12 && stats.abandoned <= 3 && avg < 8){
+    y += 6;
+    ctx.font = '14px Georgia, serif'; ctx.fillStyle = 'rgba(160,205,175,0.85)';
+    ctx.fillText('You could work this board as ' + DIFFS[diff+1].name.toLowerCase()
+               + '. Sign on for it before the next day.', W/2, y);
+    y += 20;
+  }
+
+  if(heard.length){
+    y += 26;
+    ctx.font = 'bold 13px Georgia, serif'; ctx.fillStyle = '#8a7546';
+    ctx.fillText('WHAT YOU HEARD TONIGHT, AND WILL NOT REPEAT', W/2, y); y += 23;
+    ctx.font = 'italic 14px Georgia, serif'; ctx.fillStyle = 'rgba(215,192,140,0.75)';
+    for(const f of heard.slice(0,6)){ ctx.fillText(f, W/2, y); y += 20; }
+  }
+  ctx.font = '13px Georgia, serif'; ctx.fillStyle = 'rgba(190,170,130,0.7)';
+  if(stats.failed){
+    ctx.fillText(stats.walked
+      ? 'You walked off in the middle of day ' + dshown + '. The run ends there — you start again at day one.'
+      : 'You lost ' + stats.abandoned + ' calls; the exchange allows ' + ALLOW
+        + '. ' + dshown + (dshown === 1 ? ' night, gone.' : ' nights, gone — you start again at day one.'),
+      W/2, H-66);
+  } else {
+    /* tomorrow is 5% busier than today, and it says so before you agree to it */
+    ctx.fillText('Day ' + (day+1) + ' — ' + weekdayOf(day+1) + ' — runs '
+               + Math.round((DAY_STEP-1)*100) + '% thicker again, '
+               + thicker(day+1) + '% above your first night.', W/2, H-66);
+  }
+  ctx.font = '15px Georgia, serif';
+  ctx.fillStyle = stats.failed
+    ? 'rgba(230,140,110,' + (0.5 + 0.3*Math.sin(performance.now()/450)) + ')'
+    : 'rgba(255,200,120,' + (0.4 + 0.3*Math.sin(performance.now()/450)) + ')';
+  ctx.fillText(stats.failed ? '—  BEGIN AGAIN AT DAY ONE  —'
+                            : '—  GO ON TO DAY ' + (day+1) + '  —', W/2, H-38);
+}
+
+/* ---------------------------------------------------------------- loop */
+reset(); mode = 'title';
+let last = performance.now();
+function frame(t){
+  const dt = Math.min(0.05, (t-last)/1000); last = t;
+  update(dt); render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
